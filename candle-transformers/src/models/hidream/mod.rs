@@ -480,7 +480,7 @@ impl HDBlockDouble {
         num_activated_experts: usize,
         vb: VarBuilder,
     ) -> Result<Self> {
-        let ada_ln_modulation = linear(dim, 12 * dim, vb.pp("adaLN_modulation"))?;
+        let ada_ln_modulation = linear(dim, 12 * dim, vb.pp("adaLN_modulation.1"))?;
         let norm1_i = layer_norm(dim, 1e-6, vb.pp("norm1_i"))?;
         let norm1_t = layer_norm(dim, 1e-6, vb.pp("norm1_t"))?;
         let attn1 = HDAttention::new(dim, heads, head_dim, false, vb.pp("attn1"))?;
@@ -562,7 +562,7 @@ impl HDBlockSingle {
         num_activated_experts: usize,
         vb: VarBuilder,
     ) -> Result<Self> {
-        let ada_ln_modulation = linear(dim, 6 * dim, vb.pp("adaLN_modulation"))?;
+        let ada_ln_modulation = linear(dim, 6 * dim, vb.pp("adaLN_modulation.1"))?;
         let norm1_i = layer_norm(dim, 1e-6, vb.pp("norm1_i"))?;
         let attn1 = HDAttention::new(dim, heads, head_dim, true, vb.pp("attn1"))?;
         let norm3_i = layer_norm(dim, 1e-6, vb.pp("norm3_i"))?;
@@ -789,7 +789,7 @@ impl HDLastLayer {
     fn new(hidden_size: usize, patch_size: usize, out_channels: usize, vb: VarBuilder) -> Result<Self> {
         let norm_final = layer_norm(hidden_size, 1e-6, vb.pp("norm_final"))?;
         let linear_layer = linear(hidden_size, patch_size * patch_size * out_channels, vb.pp("linear"))?;
-        let ada_ln_modulation = linear(hidden_size, 2 * hidden_size, vb.pp("adaLN_modulation"))?;
+        let ada_ln_modulation = linear(hidden_size, 2 * hidden_size, vb.pp("adaLN_modulation.1"))?;
         Ok(Self { norm_final, linear: linear_layer, ada_ln_modulation })
     }
 }
