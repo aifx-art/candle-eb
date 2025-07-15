@@ -462,12 +462,8 @@ impl Module for HDAttention {
 #[derive(Debug, Clone)]
 struct HDBlockDouble {
     ada_ln_modulation: Linear,
-    norm1_i: LayerNorm,
-    norm1_t: LayerNorm,
     attn1: HDAttention,
-    norm3_i: LayerNorm,
     ff_i: HDMOEFeedForwardSwiGLU,
-    norm3_t: LayerNorm,
     ff_t: HDFeedForwardSwiGLU,
 }
 
@@ -481,14 +477,10 @@ impl HDBlockDouble {
         vb: VarBuilder,
     ) -> Result<Self> {
         let ada_ln_modulation = linear(dim, 12 * dim, vb.pp("adaLN_modulation.1"))?;
-        let norm1_i = layer_norm(dim, 1e-6, vb.pp("norm1_i"))?;
-        let norm1_t = layer_norm(dim, 1e-6, vb.pp("norm1_t"))?;
         let attn1 = HDAttention::new(dim, heads, head_dim, false, vb.pp("attn1"))?;
-        let norm3_i = layer_norm(dim, 1e-6, vb.pp("norm3_i"))?;
         let ff_i = HDMOEFeedForwardSwiGLU::new(dim, 4 * dim, num_routed_experts, num_activated_experts, vb.pp("ff_i"))?;
-        let norm3_t = layer_norm(dim, 1e-6, vb.pp("norm3_t"))?;
         let ff_t = HDFeedForwardSwiGLU::new(dim, 4 * dim, vb.pp("ff_t"))?;
-        Ok(Self { ada_ln_modulation, norm1_i, norm1_t, attn1, norm3_i, ff_i, norm3_t, ff_t })
+        Ok(Self { ada_ln_modulation, attn1, ff_i, ff_t })
     }
 }
 
@@ -504,8 +496,16 @@ impl HDBlockDouble {
         let (shift_mlp_t, scale_mlp_t, gate_mlp_t) = (&chunks[9], &chunks[10], &chunks[11]);
 
         // Attention block
-        let norm_img = self.norm1_i.forward(img)?;
-        let norm_txt = self.norm1_t.forward(txt)?;
+        let norm_img = {
+            let mean = img.mean_keepdim(D::Minus1)?;
+            let var = img.var_keepdim(D::Minus1)?;
+            (img - &mean)? / (var + 1e-6)?.sqrt()?
+        }?;
+        let norm_txt = {
+            let mean = txt.mean_keepdim(D::Minus1)?;
+            let var = txt.var_keepdim(D::Minus1)?;
+            (txt - &mean)? / (var + 1e-6)?.sqrt()?
+        }?;
         
         let norm_img = norm_img.broadcast_mul(&(scale_msa_i.unsqueeze(1)? + 1.0)?)?
             .broadcast_add(&shift_msa_i.unsqueeze(1)?)?;
@@ -518,8 +518,16 @@ impl HDBlockDouble {
         let txt = (txt + gate_msa_t.unsqueeze(1)?.broadcast_mul(&attn_txt)?)?;
 
         // Feed forward block
-        let norm_img = self.norm3_i.forward(&img)?;
-        let norm_txt = self.norm3_t.forward(&txt)?;
+        let norm_img = {
+            let mean = img.mean_keepdim(D::Minus1)?;
+            let var = img.var_keepdim(D::Minus1)?;
+            (img.clone() - &mean)? / (var + 1e-6)?.sqrt()?
+        }?;
+        let norm_txt = {
+            let mean = txt.mean_keepdim(D::Minus1)?;
+            let var = txt.var_keepdim(D::Minus1)?;
+            (txt.clone() - &mean)? / (var + 1e-6)?.sqrt()?
+        }?;
         
         let norm_img = norm_img.broadcast_mul(&(scale_mlp_i.unsqueeze(1)? + 1.0)?)?
             .broadcast_add(&shift_mlp_i.unsqueeze(1)?)?;
@@ -547,9 +555,7 @@ impl Module for HDBlockDouble {
 #[derive(Debug, Clone)]
 struct HDBlockSingle {
     ada_ln_modulation: Linear,
-    norm1_i: LayerNorm,
     attn1: HDAttention,
-    norm3_i: LayerNorm,
     ff_i: HDMOEFeedForwardSwiGLU,
 }
 
@@ -563,11 +569,9 @@ impl HDBlockSingle {
         vb: VarBuilder,
     ) -> Result<Self> {
         let ada_ln_modulation = linear(dim, 6 * dim, vb.pp("adaLN_modulation.1"))?;
-        let norm1_i = layer_norm(dim, 1e-6, vb.pp("norm1_i"))?;
         let attn1 = HDAttention::new(dim, heads, head_dim, true, vb.pp("attn1"))?;
-        let norm3_i = layer_norm(dim, 1e-6, vb.pp("norm3_i"))?;
         let ff_i = HDMOEFeedForwardSwiGLU::new(dim, 4 * dim, num_routed_experts, num_activated_experts, vb.pp("ff_i"))?;
-        Ok(Self { ada_ln_modulation, norm1_i, attn1, norm3_i, ff_i })
+        Ok(Self { ada_ln_modulation, attn1, ff_i })
     }
 }
 
@@ -581,7 +585,11 @@ impl HDBlockSingle {
         let (shift_mlp, scale_mlp, gate_mlp) = (&chunks[3], &chunks[4], &chunks[5]);
 
         // Attention block
-        let norm_x = self.norm1_i.forward(x)?;
+        let norm_x = {
+            let mean = x.mean_keepdim(D::Minus1)?;
+            let var = x.var_keepdim(D::Minus1)?;
+            (x - &mean)? / (var + 1e-6)?.sqrt()?
+        }?;
         let norm_x = norm_x.broadcast_mul(&(scale_msa.unsqueeze(1)? + 1.0)?)?
             .broadcast_add(&shift_msa.unsqueeze(1)?)?;
 
@@ -589,7 +597,11 @@ impl HDBlockSingle {
         let x = (x + gate_msa.unsqueeze(1)?.broadcast_mul(&attn_out)?)?;
 
         // Feed forward block
-        let norm_x = self.norm3_i.forward(&x)?;
+        let norm_x = {
+            let mean = x.mean_keepdim(D::Minus1)?;
+            let var = x.var_keepdim(D::Minus1)?;
+            (x.clone() - &mean)? / (var + 1e-6)?.sqrt()?
+        }?;
         let norm_x = norm_x.broadcast_mul(&(scale_mlp.unsqueeze(1)? + 1.0)?)?
             .broadcast_add(&shift_mlp.unsqueeze(1)?)?;
 
@@ -834,5 +846,3 @@ fn rope(pos: &Tensor, dim: usize, theta: usize) -> Result<Tensor> {
     let sin = freqs.sin()?;
     Tensor::cat(&[cos, sin], D::Minus1)
 }
-
-// Add other functions as needed.
