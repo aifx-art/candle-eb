@@ -34,12 +34,17 @@ fn default_embed_dim() -> usize {
     512
 }
 
+fn default_activation() -> Activation {
+    Activation::QuickGelu
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipTextConfig {
     #[serde(default = "default_vocab_size")]
     pub vocab_size: usize,
     #[serde(default = "default_embed_dim")]
     pub embed_dim: usize,
+    #[serde(default = "default_activation")]
     pub activation: Activation,
     pub intermediate_size: usize,
     pub max_position_embeddings: usize,
