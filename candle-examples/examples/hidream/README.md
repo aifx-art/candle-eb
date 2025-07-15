@@ -25,11 +25,11 @@ and
 - ❌ **CRITICAL**: Model layers are created but weights aren't loaded from the safetensors file
 - ❌ **CRITICAL**: VarBuilder paths don't match actual safetensors structure
 
-### 3. Weight Loading Issues ❌
-- ❌ **CRITICAL**: Safetensors file is loaded but weights aren't mapped to model components
-- ❌ **CRITICAL**: Need to inspect safetensors structure and map to HDModel layers
-- ❌ **CRITICAL**: VarBuilder paths need to match actual weight names in safetensors
-- ❌ **CRITICAL**: Missing proper model instantiation with loaded weights
+### 3. Weight Loading Issues ✅
+- ✅ **FIXED**: Safetensors file is loaded but weights aren't mapped to model components
+- ✅ **FIXED**: Need to inspect safetensors structure and map to HDModel layers
+- ✅ **FIXED**: VarBuilder paths need to match actual weight names in safetensors
+- ✅ **FIXED**: Missing proper model instantiation with loaded weights
 
 ### 4. Text Encoder Issues ❌
 - ❌ **CRITICAL**: LLaMA embeddings are just zero tensors (placeholder)
@@ -90,8 +90,9 @@ let llama_emb = Tensor::zeros((1, 128, 4096), dtype, device)?;
 - [x] **FIXED**: Corrected `adaLN_modulation` paths to account for `nn.Sequential` wrapper
 - [x] **FIXED**: Added `.block` prefix to `VarBuilder` paths to match Python's `HDBlock` wrapper
 - [x] **FIXED**: Removed `LayerNorm` layers that were not present in the safetensors file
+- [x] **FIXED**: Corrected `RmsNorm` size mismatch and application order in `HDAttention`
 
-### Phase 2: Fix VAE Integration 🔄 DOING  
+### Phase 2: Fix VAE Integration 🔄 DOING
 - [ ] Replace random latent generation with proper VAE encoding
 - [ ] Implement proper latent space initialization
 - [ ] Fix latent dimensions to match VAE expectations

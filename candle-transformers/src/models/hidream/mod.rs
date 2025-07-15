@@ -360,16 +360,16 @@ impl HDAttention {
         let to_v = linear(inner_dim, inner_dim, vb.pp("to_v"))?;
         let to_out = linear(inner_dim, query_dim, vb.pp("to_out"))?;
 
-        let q_rms_norm = candle_nn::rms_norm_non_quant(dim_head, 1e-5, vb.pp("q_rms_norm"))?;
-        let k_rms_norm = candle_nn::rms_norm_non_quant(dim_head, 1e-5, vb.pp("k_rms_norm"))?;
+        let q_rms_norm = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("q_rms_norm"))?;
+        let k_rms_norm = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("k_rms_norm"))?;
 
         let to_q_t = linear(query_dim, inner_dim, vb.pp("to_q_t"))?;
         let to_k_t = linear(inner_dim, inner_dim, vb.pp("to_k_t"))?;
         let to_v_t = linear(inner_dim, inner_dim, vb.pp("to_v_t"))?;
         let to_out_t = linear(inner_dim, query_dim, vb.pp("to_out_t"))?;
 
-        let q_rms_norm_t = candle_nn::rms_norm_non_quant(dim_head, 1e-5, vb.pp("q_rms_norm_t"))?;
-        let k_rms_norm_t = candle_nn::rms_norm_non_quant(dim_head, 1e-5, vb.pp("k_rms_norm_t"))?;
+        let q_rms_norm_t = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("q_rms_norm_t"))?;
+        let k_rms_norm_t = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("k_rms_norm_t"))?;
 
         Ok(Self {
             to_q, to_k, to_v, to_out,
@@ -391,6 +391,12 @@ impl HDAttention {
         let k_t = self.to_k_t.forward(txt)?;
         let v_t = self.to_v_t.forward(txt)?;
 
+        // Apply RMS norm
+        let q_i = self.q_rms_norm.forward(&q_i)?;
+        let k_i = self.k_rms_norm.forward(&k_i)?;
+        let q_t = self.q_rms_norm_t.forward(&q_t)?;
+        let k_t = self.k_rms_norm_t.forward(&k_t)?;
+
         // Reshape for multi-head attention
         let (b, seq_i, _) = img.dims3()?;
         let (_, seq_t, _) = txt.dims3()?;
@@ -402,12 +408,6 @@ impl HDAttention {
         let q_t = q_t.reshape((b, seq_t, self.heads, self.dim_head))?;
         let k_t = k_t.reshape((b, seq_t, self.heads, self.dim_head))?;
         let v_t = v_t.reshape((b, seq_t, self.heads, self.dim_head))?;
-
-        // Apply RMS norm
-        let q_i = self.q_rms_norm.forward(&q_i)?;
-        let k_i = self.k_rms_norm.forward(&k_i)?;
-        let q_t = self.q_rms_norm_t.forward(&q_t)?;
-        let k_t = self.k_rms_norm_t.forward(&k_t)?;
 
         // Concatenate for joint attention
         let q = Tensor::cat(&[q_i, q_t], 1)?;
@@ -436,13 +436,13 @@ impl HDAttention {
         let k = self.to_k.forward(x)?;
         let v = self.to_v.forward(x)?;
         
+        let q = self.q_rms_norm.forward(&q)?;
+        let k = self.k_rms_norm.forward(&k)?;
+
         let (b, seq, _) = x.dims3()?;
         let q = q.reshape((b, seq, self.heads, self.dim_head))?;
         let k = k.reshape((b, seq, self.heads, self.dim_head))?;
         let v = v.reshape((b, seq, self.heads, self.dim_head))?;
-
-        let q = self.q_rms_norm.forward(&q)?;
-        let k = self.k_rms_norm.forward(&k)?;
 
         let attn_out = attention(&q, &k, &v, pe)?;
         let attn_out = attn_out.reshape((b, seq, self.heads * self.dim_head))?;
