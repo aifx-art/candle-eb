@@ -10,6 +10,7 @@ use self::{
     vision_model::ClipVisionTransformer,
 };
 use candle::{Result, Tensor, D};
+use serde::Deserialize;
 
 pub mod text_model;
 pub mod vision_model;
@@ -66,7 +67,7 @@ impl EncoderConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ClipConfig {
     pub text_config: text_model::ClipTextConfig,
     pub vision_config: vision_model::ClipVisionConfig,

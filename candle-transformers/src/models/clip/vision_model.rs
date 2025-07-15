@@ -10,13 +10,14 @@ use candle::{IndexOp, Result, Shape, Tensor, D};
 use candle_nn as nn;
 use candle_nn::Module;
 use nn::Conv2dConfig;
+use serde::Deserialize;
 
 use super::{
     text_model::{Activation, ClipEncoder},
     EncoderConfig,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ClipVisionConfig {
     pub embed_dim: usize,
     pub activation: Activation,

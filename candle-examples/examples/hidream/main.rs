@@ -145,46 +145,32 @@ fn load_image(path: &str) -> Result<Tensor> {
 
 fn encode_text_embeddings(
     prompt: &str,
-    negative_prompt: &str,
+    _negative_prompt: &str,
     device: &candle::Device,
     dtype: candle::DType,
     do_classifier_free_guidance: bool,
 ) -> Result<(Tensor, Tensor, Tensor, Tensor)> {
     let api = hf_hub::api::sync::Api::new()?;
+    let text_encoder_repo =
+        api.repo(hf_hub::Repo::model("Comfy-Org/HiDream-I1_ComfyUI".to_string()));
 
     // Load T5 embeddings
     let t5_emb = {
-        // let repo = api.repo(hf_hub::Repo::with_revision(
-        //     "google/t5-v1_1-xxl".to_string(),
-        //     hf_hub::RepoType::Model,
-        //     "refs/pr/2".to_string(),
-        // ));
-        // let model_file = repo.get("model.safetensors")?;
-        let reponame = "comfyanonymous/flux_text_encoders";
-        let repofile = "t5xxl_fp16.safetensors";
-        let repo = api.repo(hf_hub::Repo::model(reponame.to_string()));
+        let model_file =
+            text_encoder_repo.get("split_files/text_encoders/t5xxl_fp8_scaled.safetensors")?;
 
-        println!(
-            "Getting T5 from {:?} url {:?}",
-            repo,
-            repo.url("model.safetensors")
-        );
-        let model_file = repo.get(repofile)?;
-
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, device)? };
-        //let config_filename = repo.get("config.json")?;
-        //let config = std::fs::read_to_string(config_filename)?;
-        //let config: t5::Config = serde_json::from_str(&config)?;
-        let repo = api.repo(hf_hub::Repo::with_revision(
+        let t5_repo = api.repo(hf_hub::Repo::with_revision(
             "google/t5-v1_1-xxl".to_string(),
             hf_hub::RepoType::Model,
             "refs/pr/2".to_string(),
         ));
-        let config_filename = repo.get("config.json")?;
-        let config = std::fs::read_to_string(config_filename)?;
-        let config: t5::Config = serde_json::from_str(&config)?;
+        let config_filename = t5_repo.get("config.json")?;
+        let config: t5::Config =
+            serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
 
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, device)? };
         let mut model = t5::T5EncoderModel::load(vb, &config)?;
+
         let tokenizer_filename = api
             .model("lmz/mt5-tokenizers".to_string())
             .get("t5-v1_1-xxl.tokenizer.json")?;
@@ -202,66 +188,83 @@ fn encode_text_embeddings(
 
     // Load CLIP embeddings (both CLIP models)
     let (clip_emb_1, clip_emb_2) = {
-        let repo = api.repo(hf_hub::Repo::model(
-            "openai/clip-vit-large-patch14".to_string(),
-        ));
-        let model_file = repo.get("model.safetensors")?;
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, device)? };
-        let config = clip::text_model::ClipTextConfig {
-            vocab_size: 49408,
-            projection_dim: 768,
-            activation: clip::text_model::Activation::QuickGelu,
-            intermediate_size: 3072,
-            embed_dim: 768,
-            max_position_embeddings: 77,
-            pad_with: None,
-            num_hidden_layers: 12,
-            num_attention_heads: 12,
-        };
-        let model = clip::text_model::ClipTextTransformer::new(vb.pp("text_model"), &config)?;
-        let tokenizer_filename = repo.get("tokenizer.json")?;
-        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
+        // First CLIP model (clip_l)
+        let model_file_l =
+            text_encoder_repo.get("split_files/text_encoders/clip_l.safetensors")?;
+        let clip1_repo =
+            api.repo(hf_hub::Repo::model("openai/clip-vit-large-patch14".to_string()));
+        let config_filename1 = clip1_repo.get("config.json")?;
+        let config1: clip::ClipConfig =
+            serde_json::from_str(&std::fs::read_to_string(config_filename1)?)?;
+        let tokenizer_filename1 = clip1_repo.get("tokenizer.json")?;
+        let tokenizer1 = Tokenizer::from_file(tokenizer_filename1).map_err(E::msg)?;
 
-        let tokens = tokenizer
+        let vb1 = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file_l], dtype, device)? };
+        let model1 =
+            clip::text_model::ClipTextTransformer::new(vb1.pp("text_model"), &config1.text_config)?;
+
+        let tokens1 = tokenizer1
             .encode(prompt, true)
             .map_err(E::msg)?
             .get_ids()
             .to_vec();
-        let input_token_ids = Tensor::new(&tokens[..], device)?.unsqueeze(0)?;
-        let text_outputs = model.forward(&input_token_ids)?;
-        
-        println!("CLIP text_outputs shape: {:?}", text_outputs.shape());
-        
-        // Get pooled output (last hidden state of [CLS] token)
-        // CLIP text model output shape is typically [batch_size, seq_len, hidden_size]
-        // We need to take the [CLS] token which is at position 0
-        let pooled_output = if text_outputs.dims().len() == 3 {
-            text_outputs.i((.., 0, ..))?  // Take [CLS] token embedding
+        let input_token_ids1 = Tensor::new(&tokens1[..], device)?.unsqueeze(0)?;
+        let text_outputs1 = model1.forward(&input_token_ids1)?;
+        let pooled_output1 = if text_outputs1.dims().len() == 3 {
+            text_outputs1.i((.., 0, ..))?
         } else {
-            // If output is 2D, it might already be pooled
-            text_outputs.clone()
+            text_outputs1.clone()
         };
-        (pooled_output.clone(), pooled_output) // Using same CLIP model for both embeddings for now
+
+        // Second CLIP model (clip_g)
+        let model_file_g =
+            text_encoder_repo.get("split_files/text_encoders/clip_g.safetensors")?;
+        let clip2_repo = api.repo(hf_hub::Repo::model(
+            "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k".to_string(),
+        ));
+        let config_filename2 = clip2_repo.get("config.json")?;
+        //TODO theres gotta be a way that doesnt require me adding Deserialize to all those ClipConfig structs. other examples must have done it.
+        let config2: clip::ClipConfig =
+            serde_json::from_str(&std::fs::read_to_string(config_filename2)?)?;
+        let tokenizer_filename2 = clip2_repo.get("tokenizer.json")?;
+        let tokenizer2 = Tokenizer::from_file(tokenizer_filename2).map_err(E::msg)?;
+
+        let vb2 = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file_g], dtype, device)? };
+        let model2 =
+            clip::text_model::ClipTextTransformer::new(vb2.pp("text_model"), &config2.text_config)?;
+
+        let tokens2 = tokenizer2
+            .encode(prompt, true)
+            .map_err(E::msg)?
+            .get_ids()
+            .to_vec();
+        let input_token_ids2 = Tensor::new(&tokens2[..], device)?.unsqueeze(0)?;
+        let text_outputs2 = model2.forward(&input_token_ids2)?;
+        let pooled_output2 = if text_outputs2.dims().len() == 3 {
+            text_outputs2.i((.., 0, ..))?
+        } else {
+            text_outputs2.clone()
+        };
+
+        (pooled_output1, pooled_output2)
     };
 
     // Load LLaMA embeddings
     let llama_emb = {
-        let repo = api.repo(hf_hub::Repo::model("meta-llama/Llama-2-7b-hf".to_string()));
-        let model_files = repo
-            .info()?
-            .siblings
-            .into_iter()
-            .filter(|f| f.rfilename.ends_with(".safetensors"))
-            .map(|f| repo.get(&f.rfilename).unwrap())
-            .collect::<Vec<_>>();
+        let model_file = text_encoder_repo
+            .get("split_files/text_encoders/llama_3.1_8b_instruct_fp8_scaled.safetensors")?;
 
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&model_files, dtype, device)? };
-        let config_filename = repo.get("config.json")?;
-        let config: llama_model::LlamaConfig = serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
+        let llama_repo = api.repo(hf_hub::Repo::model(
+            "meta-llama/Meta-Llama-3.1-8B-Instruct".to_string(),
+        ));
+        let tokenizer_filename = llama_repo.get("tokenizer.json")?;
+        let config_filename = llama_repo.get("config.json")?;
+        let config: llama_model::LlamaConfig =
+            serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
         let config = config.into_config(false);
 
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, device)? };
         let mut model = llama_model::Llama::load(vb, &config)?;
-        let tokenizer_filename = repo.get("tokenizer.json")?;
         let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
 
         let mut tokens = tokenizer
