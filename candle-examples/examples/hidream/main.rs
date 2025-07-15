@@ -355,21 +355,21 @@ fn run(args: Args) -> Result<()> {
     
     let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, &device)? };
 
-    // Create HiDream model config based on the variant
+    // Create HiDream model config based on the Python reference
     let config = hidream::Config::new(
-        1, // patch_size
-        64, // in_channels
-        64, // out_channels
-        16, // num_layers
-        32, // num_single_layers
-        128, // attention_head_dim
-        20, // num_attention_heads
-        2048, // text_emb_dim
-        4, // num_routed_experts
-        2, // num_activated_experts
-        (32, 32), // axes_dims_rope
-        (128, 128), // max_resolution
-        (0..48).collect() // llama_layers
+        2, // patch_size (from Python: patch_size = 2)
+        64, // in_channels (from Python: in_channels = 64)
+        64, // out_channels (from Python: out_channels = 64)
+        16, // num_layers (from Python: num_layers = 16)
+        32, // num_single_layers (from Python: num_single_layers = 32)
+        128, // attention_head_dim (from Python: attention_head_dim = 128)
+        20, // num_attention_heads (from Python: num_attention_heads = 20)
+        2048, // text_emb_dim (from Python: text_emb_dim = 2048)
+        4, // num_routed_experts (from Python: num_routed_experts = 4)
+        2, // num_activated_experts (from Python: num_activated_experts = 2)
+        (32, 32), // axes_dims_rope (from Python: axes_dims_rope = (32, 32))
+        (128, 128), // max_resolution (from Python: max_resolution = (128, 128))
+        (0..48).collect() // llama_layers (from Python: llama_layers = list(range(48)))
     );
     
     // Load the HiDream model
