@@ -9,6 +9,7 @@ use std::path::Path;
 impl From<DType> for st::Dtype {
     fn from(value: DType) -> Self {
         match value {
+            DType::F8E4M3 => st::Dtype::F8_E4M3,
             DType::U8 => st::Dtype::U8,
             DType::U32 => st::Dtype::U32,
             DType::I64 => st::Dtype::I64,
@@ -17,8 +18,7 @@ impl From<DType> for st::Dtype {
             DType::BF16 => st::Dtype::BF16,
             DType::F16 => st::Dtype::F16,
             DType::F32 => st::Dtype::F32,
-            DType::F64 => st::Dtype::F64,
-            DType::F8E4M3 => st::Dtype::F8_E4M3,
+            DType::F64 => st::Dtype::F64,            
         }
     }
 }

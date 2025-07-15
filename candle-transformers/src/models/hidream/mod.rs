@@ -848,7 +848,7 @@ impl HDModel {
         }
         
         // Concatenate img and txt_init for single stream
-        let mut x = Tensor::cat(&[img, &txt_init], 1)?;
+        let mut x = Tensor::cat(&[img, txt_init], 1)?;
         let joint_len = x.dim(1)?;
         
         // Single stream blocks
