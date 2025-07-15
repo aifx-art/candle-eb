@@ -26,8 +26,13 @@ impl Module for Activation {
     }
 }
 
+fn default_vocab_size() -> usize {
+    49408
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipTextConfig {
+    #[serde(default = "default_vocab_size")]
     pub vocab_size: usize,
     pub embed_dim: usize,
     pub activation: Activation,

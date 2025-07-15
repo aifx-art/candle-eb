@@ -94,8 +94,13 @@ where
     }
 }
 
+fn default_vocab_size() -> usize {
+    32128
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Config {
+    #[serde(default = "default_vocab_size")]
     pub vocab_size: usize,
     pub d_model: usize,
     pub d_kv: usize,

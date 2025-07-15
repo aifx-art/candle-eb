@@ -29,10 +29,15 @@ pub enum LlamaEosToks {
     Multiple(Vec<u32>),
 }
 
+fn default_vocab_size() -> usize {
+    32000
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct LlamaConfig {
     pub hidden_size: usize,
     pub intermediate_size: usize,
+    #[serde(default = "default_vocab_size")]
     pub vocab_size: usize,
     pub num_hidden_layers: usize,
     pub num_attention_heads: usize,
