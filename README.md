@@ -196,6 +196,9 @@ If you have an addition to this list, please submit a pull request.
 
 <!--- ANCHOR_END: useful_libraries --->
 
+## Done
+- [x] Add F8_E4M3 support to safetensors.
+
 <!--- ANCHOR: features --->
 
 ## Features
