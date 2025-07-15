@@ -7,7 +7,7 @@ pub mod schedulers;
 
 use candle::{DType, IndexOp, Module, Result, Tensor, D};
 use candle_nn::layer_norm::RmsNormNonQuantized;
-use candle_nn::{linear, Activation, LayerNorm, Linear, RmsNorm, VarBuilder};
+use candle_nn::{linear, LayerNorm, Linear, RmsNorm, VarBuilder};
 use std::vec::Vec;
 
 // Import attention function from flux
@@ -637,16 +637,10 @@ pub struct Config {
     pub llama_layers: Vec<usize>,
     #[serde(default = "default_image_size")]
     pub image_size: (usize, usize),
-    #[serde(default = "default_activation")]
-    pub activation: Activation,
 }
 
 fn default_image_size() -> (usize, usize) {
     (1024, 1024)
-}
-
-fn default_activation() -> Activation {
-    Activation::Silu
 }
 
 impl Config {
@@ -682,7 +676,6 @@ impl Config {
             max_resolution,
             llama_layers,
             image_size: (1024, 1024),
-            activation: Activation::Silu,
         }
     }
 }
