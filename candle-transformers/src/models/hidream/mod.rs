@@ -628,7 +628,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            patch_size: 2,
+            patch_size: 1,
             in_channels: 64,
             out_channels: 64,
             num_layers: 16,

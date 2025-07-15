@@ -1,3 +1,17 @@
+# First thing
+, repo_type: Model, revision: "main" } } url "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/model.safetensors"
+CLIP text_outputs shape: [1, 768]
+CLIP emb 1 shape: [1, 768]
+CLIP emb 2 shape: [1, 768]
+Combined pooled emb shape: [1, 1536]
+Text embeddings encoded successfully
+Loading Flux VAE...
+VAE loaded successfully
+Loading model file: split_files/diffusion_models/hidream_i1_fast_fp8.safetensors
+Loading HiDream model...
+Error: cannot find tensor double_stream_blocks.adaLN_modulation.weight
+
+
 # Reference code
 our code:
 @/candle-examples/examples/hidream/main.rs 

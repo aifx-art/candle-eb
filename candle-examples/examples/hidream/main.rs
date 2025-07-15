@@ -331,7 +331,7 @@ fn run(args: Args) -> Result<()> {
 
     // Create HiDream model config based on the variant
     let config = hidream::Config {
-        patch_size: 2,
+        patch_size: 1,
         in_channels: 64,
         out_channels: 64,
         num_layers: 16,
