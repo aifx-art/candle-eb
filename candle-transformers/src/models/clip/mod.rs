@@ -67,6 +67,10 @@ impl EncoderConfig {
     }
 }
 
+fn default_image_size() -> usize {
+    224
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct ClipConfig {
     #[serde(flatten)]
@@ -74,6 +78,7 @@ pub struct ClipConfig {
     #[serde(flatten)]
     pub vision_config: vision_model::ClipVisionConfig,
     pub logit_scale_init_value: f32,
+    #[serde(default = "default_image_size")]
     pub image_size: usize,
 }
 

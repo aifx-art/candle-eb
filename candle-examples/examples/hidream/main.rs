@@ -357,21 +357,22 @@ fn run(args: Args) -> Result<()> {
     let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, &device)? };
 
     // Create HiDream model config based on the variant
-    let config = hidream::Config {
-        patch_size: 1,
-        in_channels: 64,
-        out_channels: 64,
-        num_layers: 16,
-        num_single_layers: 32,
-        attention_head_dim: 128,
-        num_attention_heads: 20,
-        text_emb_dim: 2048,
-        num_routed_experts: 4,
-        num_activated_experts: 2,
-        axes_dims_rope: (32, 32),
-        max_resolution: (128, 128),
-        llama_layers: (0..48).collect(), // All LLaMA layers
-    };
+    let config = hidream::Config::new(
+        1, // patch_size
+        64, // in_channels
+        64, // out_channels
+        16, // num_layers
+        32, // num_single_layers
+        128, // attention_head_dim
+        20, // num_attention_heads
+        2048, // text_emb_dim
+        4, // num_routed_experts
+        2, // num_activated_experts
+        (32, 32), // axes_dims_rope
+        (128, 128), // max_resolution
+        (0..48).collect(), // llama_layers
+        (args.height, args.width), // image_size
+    );
     
     // Load the HiDream model
     println!("Loading HiDream model...");

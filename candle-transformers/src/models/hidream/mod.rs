@@ -620,7 +620,7 @@ impl Module for HDBlockSingle {
 }
 
 // Config
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     pub patch_size: usize,
     pub in_channels: usize,
@@ -635,24 +635,41 @@ pub struct Config {
     pub axes_dims_rope: (usize, usize),
     pub max_resolution: (usize, usize),
     pub llama_layers: Vec<usize>,
+    pub image_size: (usize, usize),
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl Config {
+    pub fn new(
+        patch_size: usize,
+        in_channels: usize,
+        out_channels: usize,
+        num_layers: usize,
+        num_single_layers: usize,
+        attention_head_dim: usize,
+        num_attention_heads: usize,
+        text_emb_dim: usize,
+        num_routed_experts: usize,
+        num_activated_experts: usize,
+        axes_dims_rope: (usize, usize),
+        max_resolution: (usize, usize),
+        llama_layers: Vec<usize>,
+        image_size: (usize, usize),
+    ) -> Self {
         Self {
-            patch_size: 1,
-            in_channels: 64,
-            out_channels: 64,
-            num_layers: 16,
-            num_single_layers: 32,
-            attention_head_dim: 128,
-            num_attention_heads: 20,
-            text_emb_dim: 2048,
-            num_routed_experts: 4,
-            num_activated_experts: 2,
-            axes_dims_rope: (32, 32),
-            max_resolution: (128, 128),
-            llama_layers: vec![],
+            patch_size,
+            in_channels,
+            out_channels,
+            num_layers,
+            num_single_layers,
+            attention_head_dim,
+            num_attention_heads,
+            text_emb_dim,
+            num_routed_experts,
+            num_activated_experts,
+            axes_dims_rope,
+            max_resolution,
+            llama_layers,
+            image_size,
         }
     }
 }

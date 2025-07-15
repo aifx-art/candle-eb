@@ -17,6 +17,10 @@ use super::{
     EncoderConfig,
 };
 
+fn default_image_size() -> usize {
+    224
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipVisionConfig {
     pub embed_dim: usize,
@@ -27,6 +31,7 @@ pub struct ClipVisionConfig {
     #[allow(dead_code)]
     pub projection_dim: usize,
     pub num_channels: usize,
+    #[serde(default = "default_image_size")]
     pub image_size: usize,
     pub patch_size: usize,
 }
