@@ -25,15 +25,10 @@ fn default_embed_dim() -> usize {
     768
 }
 
-fn default_activation() -> Activation {
-    Activation::QuickGelu
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipVisionConfig {
     #[serde(default = "default_embed_dim")]
     pub embed_dim: usize,
-    #[serde(default = "default_activation")]
     pub activation: Activation,
     pub intermediate_size: usize,
     pub num_hidden_layers: usize,

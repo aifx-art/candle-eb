@@ -4,9 +4,9 @@ our code:
 @/candle-transformers/src/models/hidream/mod.rs 
 
 our reference:
-@/candle-examples/examples/hidream/reference
+@candle-examples/examples/hidream/reference/pipeline_hidream_image.py
 and
-@/candle-transformers/src/models/hidream/reference/model.py
+@candle-transformers/src/models/hidream/reference/model.py
 
 # HiDream Implementation TODO List
 

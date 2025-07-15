@@ -631,10 +631,10 @@ pub struct Config {
     pub text_emb_dim: usize,
     pub num_routed_experts: usize,
     pub num_activated_experts: usize,
+    pub intermediate_size: usize,
     pub axes_dims_rope: (usize, usize),
     pub max_resolution: (usize, usize),
     pub llama_layers: Vec<usize>,
-    pub caption_channels: Vec<usize>,
     pub image_size: (usize, usize),
     pub activation: Activation,
 }
@@ -651,13 +651,11 @@ impl Config {
         text_emb_dim: usize,
         num_routed_experts: usize,
         num_activated_experts: usize,
+        intermediate_size: usize,
         axes_dims_rope: (usize, usize),
         max_resolution: (usize, usize),
         llama_layers: Vec<usize>,
     ) -> Self {
-        // From Python reference: caption_channels = [4096, 2048] (LLaMA hidden size, T5 hidden size)
-        let caption_channels = vec![4096, 2048];
-        
         Self {
             patch_size,
             in_channels,
@@ -669,10 +667,10 @@ impl Config {
             text_emb_dim,
             num_routed_experts,
             num_activated_experts,
+            intermediate_size,
             axes_dims_rope,
             max_resolution,
             llama_layers,
-            caption_channels,
             image_size: (1024, 1024),
             activation: Activation::Silu,
         }
@@ -700,42 +698,19 @@ impl HDModel {
         let p_embedder = PooledEmbed::new(config.text_emb_dim, inner_dim, vb.pp("p_embedder"))?;
         let x_embedder = PatchEmbed::new(config.patch_size, config.in_channels, inner_dim, vb.pp("x_embedder"))?;
         let pe_embedder = EmbedNd::new(10000, vec![config.axes_dims_rope.0, config.axes_dims_rope.1]);
-        
         let mut double_stream_blocks = Vec::new();
         for i in 0..config.num_layers {
             let block_vb = vb.pp(&format!("double_stream_blocks.{}", i)).pp("block");
             double_stream_blocks.push(HDBlockDouble::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, block_vb)?);
         }
-        
         let mut single_stream_blocks = Vec::new();
         for i in 0..config.num_single_layers {
             let block_vb = vb.pp(&format!("single_stream_blocks.{}", i)).pp("block");
             single_stream_blocks.push(HDBlockSingle::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, block_vb)?);
         }
-        
         let final_layer = HDLastLayer::new(inner_dim, config.patch_size, config.out_channels, vb.pp("final_layer"))?;
-        
-        // Initialize caption projections as per Python reference
-        // caption_channels = [caption_channels[1], ] * (num_layers + num_single_layers) + [caption_channels[0], ]
-        let mut caption_projection = Vec::new();
-        let total_layers = config.num_layers + config.num_single_layers;
-        
-        // Add LLaMA projections for each layer (caption_channels[1] = 4096)
-        for i in 0..total_layers {
-            caption_projection.push(TextProjection::new(
-                config.caption_channels[1], // LLaMA hidden size (4096)
-                inner_dim,
-                vb.pp(&format!("caption_projection.{}", i))
-            )?);
-        }
-        
-        // Add T5 projection for the final layer (caption_channels[0] = 2048)
-        caption_projection.push(TextProjection::new(
-            config.caption_channels[0], // T5 hidden size (2048)
-            inner_dim,
-            vb.pp(&format!("caption_projection.{}", total_layers))
-        )?);
-        
+        let caption_projection = Vec::new();
+        // Add caption projections as per Python
         let max_seq = config.max_resolution.0 * config.max_resolution.1 / (config.patch_size * config.patch_size);
         Ok(Self { t_embedder, p_embedder, x_embedder, pe_embedder, double_stream_blocks, single_stream_blocks, final_layer, caption_projection, max_seq })
     }
