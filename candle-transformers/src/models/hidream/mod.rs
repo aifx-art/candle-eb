@@ -635,8 +635,18 @@ pub struct Config {
     pub axes_dims_rope: (usize, usize),
     pub max_resolution: (usize, usize),
     pub llama_layers: Vec<usize>,
+    #[serde(default = "default_image_size")]
     pub image_size: (usize, usize),
+    #[serde(default = "default_activation")]
     pub activation: Activation,
+}
+
+fn default_image_size() -> (usize, usize) {
+    (1024, 1024)
+}
+
+fn default_activation() -> Activation {
+    Activation::Silu
 }
 
 impl Config {

@@ -1,7 +1,7 @@
 # Reference code
 our code:
-@/candle-examples/examples/hidream/main.rs 
-@/candle-transformers/src/models/hidream/mod.rs 
+@candle-examples/examples/hidream/main.rs 
+@candle-transformers/src/models/hidream/mod.rs 
 
 our reference:
 @candle-examples/examples/hidream/reference/pipeline_hidream_image.py
