@@ -10,6 +10,12 @@ our reference:
 and
 @candle-transformers/src/models/hidream/reference/model.py
 
+flux has many similar systems. 
+check how they do things. 
+@candle-examples/examples/flux/
+@candle-transformers/src/models/flux 
+
+
 # HiDream Implementation TODO List
 
 ## Current Issues and Fixes Needed

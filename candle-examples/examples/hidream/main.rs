@@ -187,20 +187,30 @@ fn encode_text_embeddings(
 
     // Load CLIP embeddings (both CLIP models)
     let (clip_emb_1, clip_emb_2) = {
-        // First CLIP model (clip_l)
+        // First CLIP model (clip_l) - openai/clip-vit-large-patch14
         let model_file_l =
             text_encoder_repo.get("split_files/text_encoders/clip_l_hidream.safetensors")?;
         let clip1_repo =
             api.repo(hf_hub::Repo::model("openai/clip-vit-large-patch14".to_string()));
-        let config_filename1 = clip1_repo.get("config.json")?;
-        let config1: clip::ClipConfig =
-            serde_json::from_str(&std::fs::read_to_string(config_filename1)?)?;
+        
+        // Manually construct config instead of deserializing from JSON to avoid missing field issues
+        let config1 = clip::text_model::ClipTextConfig {
+            vocab_size: 49408,
+            embed_dim: 768,
+            activation: clip::text_model::Activation::QuickGelu,
+            intermediate_size: 3072,
+            max_position_embeddings: 248,  // Updated to match the actual model weights
+            pad_with: None,
+            num_hidden_layers: 12,
+            num_attention_heads: 12,
+            projection_dim: 768,
+        };
+        
         let tokenizer_filename1 = clip1_repo.get("tokenizer.json")?;
         let tokenizer1 = Tokenizer::from_file(tokenizer_filename1).map_err(E::msg)?;
 
         let vb1 = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file_l], dtype, device)? };
-        let model1 =
-            clip::text_model::ClipTextTransformer::new(vb1.pp("text_model"), &config1.text_config)?;
+        let model1 = clip::text_model::ClipTextTransformer::new(vb1.pp("text_model"), &config1)?;
 
         let tokens1 = tokenizer1
             .encode(prompt, true)
@@ -215,22 +225,31 @@ fn encode_text_embeddings(
             text_outputs1.clone()
         };
 
-        // Second CLIP model (clip_g)
+        // Second CLIP model (clip_g) - laion/CLIP-ViT-bigG-14-laion2B-39B-b160k
         let model_file_g =
             text_encoder_repo.get("split_files/text_encoders/clip_g_hidream.safetensors")?;
         let clip2_repo = api.repo(hf_hub::Repo::model(
             "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k".to_string(),
         ));
-        let config_filename2 = clip2_repo.get("config.json")?;
-        //TODO theres gotta be a way that doesnt require me adding Deserialize to all those ClipConfig structs. other examples must have done it.
-        let config2: clip::ClipConfig =
-            serde_json::from_str(&std::fs::read_to_string(config_filename2)?)?;
+        
+        // Manually construct config for the larger CLIP model
+        let config2 = clip::text_model::ClipTextConfig {
+            vocab_size: 49408,
+            embed_dim: 1280,  // bigG model has larger embedding dimension
+            activation: clip::text_model::Activation::QuickGelu,
+            intermediate_size: 5120,  // 4 * embed_dim
+            max_position_embeddings: 218,  // Updated to match the actual model weights
+            pad_with: None,
+            num_hidden_layers: 32,  // bigG model has more layers
+            num_attention_heads: 20,  // bigG model has more attention heads
+            projection_dim: 1280,
+        };
+        
         let tokenizer_filename2 = clip2_repo.get("tokenizer.json")?;
         let tokenizer2 = Tokenizer::from_file(tokenizer_filename2).map_err(E::msg)?;
 
         let vb2 = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file_g], dtype, device)? };
-        let model2 =
-            clip::text_model::ClipTextTransformer::new(vb2.pp("text_model"), &config2.text_config)?;
+        let model2 = clip::text_model::ClipTextTransformer::new(vb2.pp("text_model"), &config2)?;
 
         let tokens2 = tokenizer2
             .encode(prompt, true)
