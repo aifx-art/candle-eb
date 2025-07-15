@@ -622,36 +622,21 @@ impl Module for HDBlockSingle {
 // Config
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
-    #[serde(default)]
     pub patch_size: usize,
-    #[serde(default)]
     pub in_channels: usize,
-    #[serde(default)]
     pub out_channels: usize,
-    #[serde(default)]
     pub num_layers: usize,
-    #[serde(default)]
     pub num_single_layers: usize,
-    #[serde(default)]
     pub attention_head_dim: usize,
-    #[serde(default)]
     pub num_attention_heads: usize,
-    #[serde(default)]
     pub text_emb_dim: usize,
-    #[serde(default)]
     pub num_routed_experts: usize,
-    #[serde(default)]
     pub num_activated_experts: usize,
-    #[serde(default)]
     pub axes_dims_rope: (usize, usize),
-    #[serde(default)]
     pub max_resolution: (usize, usize),
-    #[serde(default)]
     pub llama_layers: Vec<usize>,
-    #[serde(default)]
     pub image_size: (usize, usize),
-    #[serde(default)]
-    pub activation: Option<Activation>,
+    pub activation: Activation,
 }
 
 impl Config {
@@ -669,7 +654,6 @@ impl Config {
         axes_dims_rope: (usize, usize),
         max_resolution: (usize, usize),
         llama_layers: Vec<usize>,
-        image_size: (usize, usize),
     ) -> Self {
         Self {
             patch_size,
@@ -685,8 +669,8 @@ impl Config {
             axes_dims_rope,
             max_resolution,
             llama_layers,
-            image_size,
-            activation: None,
+            image_size: (1024, 1024),
+            activation: Activation::Silu,
         }
     }
 }

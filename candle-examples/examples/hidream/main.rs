@@ -370,8 +370,7 @@ fn run(args: Args) -> Result<()> {
         2, // num_activated_experts
         (32, 32), // axes_dims_rope
         (128, 128), // max_resolution
-        (0..48).collect(), // llama_layers
-        (args.height, args.width), // image_size
+        (0..48).collect() // llama_layers
     );
     
     // Load the HiDream model
