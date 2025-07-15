@@ -30,10 +30,15 @@ fn default_vocab_size() -> usize {
     49408
 }
 
+fn default_embed_dim() -> usize {
+    512
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipTextConfig {
     #[serde(default = "default_vocab_size")]
     pub vocab_size: usize,
+    #[serde(default = "default_embed_dim")]
     pub embed_dim: usize,
     pub activation: Activation,
     pub intermediate_size: usize,

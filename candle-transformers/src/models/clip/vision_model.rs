@@ -21,8 +21,13 @@ fn default_image_size() -> usize {
     224
 }
 
+fn default_embed_dim() -> usize {
+    768
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ClipVisionConfig {
+    #[serde(default = "default_embed_dim")]
     pub embed_dim: usize,
     pub activation: Activation,
     pub intermediate_size: usize,
