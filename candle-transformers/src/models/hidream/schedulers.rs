@@ -31,7 +31,7 @@ impl FlowMatchEulerDiscreteScheduler {
     }
 
     /// Set the timesteps for inference
-    pub fn set_timesteps(&mut self, num_inference_steps: usize, device: &Device) -> Result<()> {
+    pub fn set_timesteps(&mut self, num_inference_steps: usize, _device: &Device) -> Result<()> {
         self.num_inference_steps = num_inference_steps;
         
         // Create timesteps using flow matching schedule
@@ -53,7 +53,7 @@ impl FlowMatchEulerDiscreteScheduler {
     }
 
     /// Perform a scheduler step (Euler method)
-    pub fn step(&self, model_output: &Tensor, timestep: f64, sample: &Tensor) -> Result<Tensor> {
+    pub fn step(&self, model_output: &Tensor, _timestep: f64, sample: &Tensor) -> Result<Tensor> {
         // Simple Euler step for flow matching
         // In flow matching, we typically have: dx/dt = v_theta(x, t)
         // Euler step: x_{t+1} = x_t + dt * v_theta(x_t, t)
@@ -76,7 +76,7 @@ impl FlowMatchEulerDiscreteScheduler {
     }
 
     /// Calculate the shift factor for dynamic shifting
-    fn calculate_shift(&self, image_seq_len: usize) -> f64 {
+    pub fn calculate_shift(&self, image_seq_len: usize) -> f64 {
         if !self.use_dynamic_shifting {
             return self.shift;
         }
@@ -118,7 +118,7 @@ impl UniPCMultistepScheduler {
     }
 
     /// Set the timesteps for inference
-    pub fn set_timesteps(&mut self, num_inference_steps: usize, device: &Device) -> Result<()> {
+    pub fn set_timesteps(&mut self, num_inference_steps: usize, _device: &Device) -> Result<()> {
         self.num_inference_steps = num_inference_steps;
         
         // Create timesteps using UniPC schedule
@@ -140,7 +140,7 @@ impl UniPCMultistepScheduler {
     }
 
     /// Perform a scheduler step (simplified UniPC)
-    pub fn step(&self, model_output: &Tensor, timestep: f64, sample: &Tensor) -> Result<Tensor> {
+    pub fn step(&self, model_output: &Tensor, _timestep: f64, sample: &Tensor) -> Result<Tensor> {
         // Simplified UniPC step - in practice this would be more complex
         // For now, fall back to Euler-like behavior
         let dt = if self.num_inference_steps > 1 {

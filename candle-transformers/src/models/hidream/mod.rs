@@ -5,10 +5,9 @@
 
 pub mod schedulers;
 
-use candle::{DType, Device, IndexOp, Module, Result, Tensor, D};
+use candle::{DType, IndexOp, Module, Result, Tensor, D};
 use candle_nn::layer_norm::RmsNormNonQuantized;
 use candle_nn::{linear, Activation, LayerNorm, Linear, RmsNorm, VarBuilder};
-use std::collections::HashMap;
 use std::vec::Vec;
 
 // Import attention function from flux
@@ -321,7 +320,7 @@ impl Module for HDMOEFeedForwardSwiGLU {
         }
         let y_reshaped = y.reshape((topk_weight.dims()[0], topk_weight.dims()[1], self.num_activated_experts, y.dims()[2]))?;
         let y_sum = topk_weight.unsqueeze(2)?.matmul(&y_reshaped)?.squeeze(2)?;
-        (y_sum + y_shared)
+        y_sum + y_shared
     }
 }
 
@@ -451,10 +450,10 @@ impl HDAttention {
 }
 
 impl Module for HDAttention {
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    fn forward(&self, _x: &Tensor) -> Result<Tensor> {
         // Default single stream forward
-        let pe = Tensor::zeros((x.dim(0)?, x.dim(1)?, self.heads, self.dim_head), x.dtype(), x.device())?;
-        self.forward_single(x, &pe)
+        let pe = Tensor::zeros((_x.dim(0)?, _x.dim(1)?, self.heads, self.dim_head), _x.dtype(), _x.device())?;
+        self.forward_single(_x, &pe)
     }
 }
 
@@ -545,7 +544,7 @@ impl HDBlockDouble {
 }
 
 impl Module for HDBlockDouble {
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    fn forward(&self, _x: &Tensor) -> Result<Tensor> {
         // This is a placeholder - the actual forward needs dual inputs
         candle::bail!("HDBlockDouble requires dual inputs, use forward_dual instead")
     }
@@ -613,7 +612,7 @@ impl HDBlockSingle {
 }
 
 impl Module for HDBlockSingle {
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    fn forward(&self, _x: &Tensor) -> Result<Tensor> {
         // This is a placeholder - the actual forward needs vec parameter
         candle::bail!("HDBlockSingle requires vec parameter, use forward_with_vec instead")
     }
@@ -707,7 +706,7 @@ impl HDModel {
             single_stream_blocks.push(HDBlockSingle::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, block_vb)?);
         }
         let final_layer = HDLastLayer::new(inner_dim, config.patch_size, config.out_channels, vb.pp("final_layer"))?;
-        let mut caption_projection = Vec::new();
+        let caption_projection = Vec::new();
         // Add caption projections as per Python
         let max_seq = config.max_resolution.0 * config.max_resolution.1 / (config.patch_size * config.patch_size);
         Ok(Self { t_embedder, p_embedder, x_embedder, pe_embedder, double_stream_blocks, single_stream_blocks, final_layer, caption_projection, max_seq })
@@ -721,10 +720,10 @@ impl HDModel {
         timesteps: &Tensor,
         encoder_hidden_states: &[Tensor], // [t5_embeds, llama_embeds]
         pooled_embeds: &Tensor,
-        img_sizes: Option<&Tensor>,
+        _img_sizes: Option<&Tensor>,
         img_ids: Option<&Tensor>,
     ) -> Result<Tensor> {
-        let (batch_size, seq_len, _) = hidden_states.dims3()?;
+        let (_batch_size, seq_len, _) = hidden_states.dims3()?;
         
         // Store original sequence length for later use
         let img_seq_len = seq_len;
@@ -764,7 +763,7 @@ impl HDModel {
         
         // Process text embeddings
         let t5_embeds = &encoder_hidden_states[0];
-        let llama_embeds = if encoder_hidden_states.len() > 1 {
+        let _llama_embeds = if encoder_hidden_states.len() > 1 {
             &encoder_hidden_states[1]
         } else {
             t5_embeds // Fallback if llama embeds not provided
@@ -803,7 +802,7 @@ impl HDModel {
 }
 
 impl Module for HDModel {
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    fn forward(&self, _x: &Tensor) -> Result<Tensor> {
         // This is a placeholder - the actual forward needs more parameters
         candle::bail!("HDModel requires additional parameters, use forward_with_cfg instead")
     }
@@ -842,7 +841,7 @@ impl HDLastLayer {
 }
 
 impl Module for HDLastLayer {
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    fn forward(&self, _x: &Tensor) -> Result<Tensor> {
         // This is a placeholder - the actual forward needs vec parameter
         // Should be called via forward_with_vec
         candle::bail!("HDLastLayer requires vec parameter, use forward_with_vec instead")

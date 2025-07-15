@@ -11,7 +11,6 @@ use candle::{IndexOp, Module, Tensor, D};
 use candle_nn::VarBuilder;
 use clap::Parser;
 use tokenizers::Tokenizer;
-use std::collections::HashSet;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -264,7 +263,7 @@ fn encode_text_embeddings(
         let config = config.into_config(false);
 
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, device)? };
-        let mut model = llama_model::Llama::load(vb, &config)?;
+        let model = llama_model::Llama::load(vb, &config)?;
         let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
 
         let mut tokens = tokenizer
@@ -285,7 +284,7 @@ fn encode_text_embeddings(
     println!("Combined pooled emb shape: {:?}", pooled_emb.shape());
 
     // Handle negative prompts for classifier-free guidance
-    let (neg_t5_emb, neg_pooled_emb) = if do_classifier_free_guidance {
+    let (_neg_t5_emb, neg_pooled_emb) = if do_classifier_free_guidance {
         // For simplicity, using zero tensors for negative embeddings
         // In a real implementation, you'd encode the negative prompt
         let neg_t5 = Tensor::zeros_like(&t5_emb)?;
