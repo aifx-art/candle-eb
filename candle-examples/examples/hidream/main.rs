@@ -247,13 +247,12 @@ fn encode_text_embeddings(
     // Load LLaMA embeddings
     let llama_emb = {
         let repo = api.repo(hf_hub::Repo::model("meta-llama/Llama-2-7b-hf".to_string()));
-        let model_files = hf_hub::api::sync::Api::new()?
-            .repo(hf_hub::Repo::model("meta-llama/Llama-2-7b-hf".to_string()))
-            .get_filenames()?;
-        let model_files = model_files
-            .iter()
-            .filter(|f| f.ends_with(".safetensors"))
-            .map(|f| repo.get(f).unwrap())
+        let model_files = repo
+            .info()?
+            .siblings
+            .into_iter()
+            .filter(|f| f.rfilename.ends_with(".safetensors"))
+            .map(|f| repo.get(&f.rfilename).unwrap())
             .collect::<Vec<_>>();
 
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&model_files, dtype, device)? };
