@@ -193,11 +193,8 @@ fn encode_text_embeddings(
         let clip1_repo =
             api.repo(hf_hub::Repo::model("openai/clip-vit-large-patch14".to_string()));
         let config_filename1 = clip1_repo.get("config.json")?;
-        println!("Loading CLIP config 1 from: {:?}", config_filename1);
-        let config_content1 = std::fs::read_to_string(config_filename1)?;
-        println!("CLIP config 1 content preview: {}", &config_content1[..std::cmp::min(500, config_content1.len())]);
         let config1: clip::ClipConfig =
-            serde_json::from_str(&config_content1)?;
+            serde_json::from_str(&std::fs::read_to_string(config_filename1)?)?;
         let tokenizer_filename1 = clip1_repo.get("tokenizer.json")?;
         let tokenizer1 = Tokenizer::from_file(tokenizer_filename1).map_err(E::msg)?;
 
@@ -225,12 +222,9 @@ fn encode_text_embeddings(
             "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k".to_string(),
         ));
         let config_filename2 = clip2_repo.get("config.json")?;
-        println!("Loading CLIP config 2 from: {:?}", config_filename2);
-        let config_content2 = std::fs::read_to_string(config_filename2)?;
-        println!("CLIP config 2 content preview: {}", &config_content2[..std::cmp::min(500, config_content2.len())]);
         //TODO theres gotta be a way that doesnt require me adding Deserialize to all those ClipConfig structs. other examples must have done it.
         let config2: clip::ClipConfig =
-            serde_json::from_str(&config_content2)?;
+            serde_json::from_str(&std::fs::read_to_string(config_filename2)?)?;
         let tokenizer_filename2 = clip2_repo.get("tokenizer.json")?;
         let tokenizer2 = Tokenizer::from_file(tokenizer_filename2).map_err(E::msg)?;
 
