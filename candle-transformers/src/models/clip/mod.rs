@@ -69,7 +69,9 @@ impl EncoderConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ClipConfig {
+    #[serde(flatten)]
     pub text_config: text_model::ClipTextConfig,
+    #[serde(flatten)]
     pub vision_config: vision_model::ClipVisionConfig,
     pub logit_scale_init_value: f32,
     pub image_size: usize,
