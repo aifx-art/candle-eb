@@ -155,9 +155,9 @@ fn encode_text_embeddings(
         api.repo(hf_hub::Repo::model("Comfy-Org/HiDream-I1_ComfyUI".to_string()));
 
     // Load T5 embeddings
-    let t5_emb = {
+    let t5_emb = {        
         let model_file =
-            text_encoder_repo.get("split_files/text_encoders/t5xxl_fp8_scaled.safetensors")?;
+            text_encoder_repo.get("split_files/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors")?;
 
         let t5_repo = api.repo(hf_hub::Repo::with_revision(
             "google/t5-v1_1-xxl".to_string(),
