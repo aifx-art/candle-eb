@@ -7,7 +7,7 @@ pub mod schedulers;
 
 use candle::{DType, Device, IndexOp, Module, Result, Tensor, D};
 use candle_nn::layer_norm::RmsNormNonQuantized;
-use candle_nn::{layer_norm, linear, Activation, LayerNorm, Linear, RmsNorm, VarBuilder};
+use candle_nn::{linear, Activation, LayerNorm, Linear, RmsNorm, VarBuilder};
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -801,7 +801,10 @@ struct HDLastLayer {
 
 impl HDLastLayer {
     fn new(hidden_size: usize, patch_size: usize, out_channels: usize, vb: VarBuilder) -> Result<Self> {
-        let norm_final = layer_norm(hidden_size, 1e-6, vb.pp("norm_final"))?;
+        let vb_ln = vb.pp("norm_final");
+        let weight = vb_ln.get(hidden_size, "weight")?;
+        let bias = vb_ln.get(hidden_size, "bias")?;
+        let norm_final = LayerNorm::new(weight, bias, 1e-6);
         let linear_layer = linear(hidden_size, patch_size * patch_size * out_channels, vb.pp("linear"))?;
         let ada_ln_modulation = linear(hidden_size, 2 * hidden_size, vb.pp("adaLN_modulation.1"))?;
         Ok(Self { norm_final, linear: linear_layer, ada_ln_modulation })
