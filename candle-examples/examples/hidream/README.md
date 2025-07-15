@@ -88,6 +88,7 @@ let llama_emb = Tensor::zeros((1, 128, 4096), dtype, device)?;
 - [x] Add weight loading validation
 - [x] **FIXED**: Corrected indexed paths for `double_stream_blocks` and `single_stream_blocks`
 - [x] **FIXED**: Corrected `adaLN_modulation` paths to account for `nn.Sequential` wrapper
+- [x] **FIXED**: Added `.block` prefix to `VarBuilder` paths to match Python's `HDBlock` wrapper
 
 ### Phase 2: Fix VAE Integration 🔄 DOING  
 - [ ] Replace random latent generation with proper VAE encoding

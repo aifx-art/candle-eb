@@ -668,11 +668,13 @@ impl HDModel {
         let pe_embedder = EmbedNd::new(10000, vec![config.axes_dims_rope.0, config.axes_dims_rope.1]);
         let mut double_stream_blocks = Vec::new();
         for i in 0..config.num_layers {
-            double_stream_blocks.push(HDBlockDouble::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, vb.pp(&format!("double_stream_blocks.{}", i)))?);
+            let block_vb = vb.pp(&format!("double_stream_blocks.{}", i)).pp("block");
+            double_stream_blocks.push(HDBlockDouble::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, block_vb)?);
         }
         let mut single_stream_blocks = Vec::new();
         for i in 0..config.num_single_layers {
-            single_stream_blocks.push(HDBlockSingle::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, vb.pp(&format!("single_stream_blocks.{}", i)))?);
+            let block_vb = vb.pp(&format!("single_stream_blocks.{}", i)).pp("block");
+            single_stream_blocks.push(HDBlockSingle::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, block_vb)?);
         }
         let final_layer = HDLastLayer::new(inner_dim, config.patch_size, config.out_channels, vb.pp("final_layer"))?;
         let mut caption_projection = Vec::new();
