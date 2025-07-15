@@ -110,11 +110,11 @@ let llama_emb = Tensor::zeros((1, 128, 4096), dtype, device)?;
 
 ### Phase 4: Fix Model Forward Pass 🔄 DOING
 - [x] **FIXED**: Basic forward_with_cfg structure implemented
-- [ ] **CRITICAL**: Fix caption projection layers (currently empty Vec)
-- [ ] **CRITICAL**: Implement proper LLaMA embedding processing through layers
+- [x] **FIXED**: Caption projection layers - implemented proper TextProjection layers
+- [x] **FIXED**: LLaMA embedding processing through layers - added prepare_contexts() method
+- [x] **FIXED**: Text concatenation order - implemented proper T5 + LLaMA concatenation per layer
 - [ ] **CRITICAL**: Fix patchify/unpatchify logic to match Python reference
 - [ ] **CRITICAL**: Add proper image ID generation for non-square images
-- [ ] **CRITICAL**: Fix text concatenation order (should be T5 + LLaMA for each layer)
 - [ ] **CRITICAL**: Implement proper CFG batching and processing
 - [ ] Add proper attention mask handling
 - [ ] Validate model output shapes and dimensions
@@ -127,28 +127,42 @@ let llama_emb = Tensor::zeros((1, 128, 4096), dtype, device)?;
 - [ ] Add support for non-square image generation
 
 ## Current Status: DOING Phase 4
-**Current Priority**: Fix Model Forward Pass Implementation
+**Current Priority**: Fix Patchify/Unpatchify Logic (Step 3 of 4)
 
 ## Critical Issues Found in Phase 4:
 
-### A. Caption Projection Missing
+### A. Caption Projection Missing ✅
 ```rust
-// CURRENT: Empty caption projection
-let caption_projection = Vec::new();
-
-// NEED: Proper caption projection layers for LLaMA embeddings
-// Python shows: caption_projection layers process LLaMA through different layers
-// Should have (num_layers + num_single_layers + 1) projection layers
+// FIXED: Proper caption projection layers implemented
+// Created (num_layers + num_single_layers + 1) TextProjection layers
+// First 48 layers project LLaMA embeddings (4096 -> inner_dim)
+// Last layer projects T5 embeddings (text_emb_dim -> inner_dim)
+let mut caption_projection = Vec::new();
+for i in 0..(config.num_layers + config.num_single_layers) {
+    let proj = TextProjection::new(4096, inner_dim, vb.pp(&format!("caption_projection.{}", i)))?;
+    caption_projection.push(proj);
+}
+let t5_proj = TextProjection::new(config.text_emb_dim, inner_dim, vb.pp(&format!("caption_projection.{}", config.num_layers + config.num_single_layers)))?;
+caption_projection.push(t5_proj);
 ```
 
-### B. Text Processing Issues
+### B. Text Processing Issues ✅
 ```rust
-// CURRENT: Simple concatenation
-let txt = t5_embeds.clone();
-
-// NEED: Proper layer-wise LLaMA processing
-// Python shows: contexts = [contexts[k] for k in self.llama_layers]
-// Each layer should get different LLaMA layer embeddings
+// FIXED: Proper layer-wise LLaMA processing implemented
+// Added prepare_contexts() method that extracts specific LLaMA layers
+// Each double/single block gets different LLaMA layer embeddings
+// Proper text concatenation: T5 + LLaMA for each layer
+fn prepare_contexts(&self, llama_embeds: &Tensor, t5_embeds: &Tensor, llama_layers: &[usize]) -> Result<Vec<Tensor>> {
+    let mut contexts = Vec::new();
+    for (i, &layer_idx) in llama_layers.iter().enumerate() {
+        let llama_layer = llama_embeds.i((.., layer_idx, .., ..))?;
+        let projected = self.caption_projection[i].forward(&llama_layer)?;
+        contexts.push(projected);
+    }
+    let t5_projected = self.caption_projection.last().unwrap().forward(t5_embeds)?;
+    contexts.push(t5_projected);
+    Ok(contexts)
+}
 ```
 
 ### C. Patchify/Unpatchify Logic

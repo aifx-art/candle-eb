@@ -447,6 +447,7 @@ fn run(args: Args) -> Result<()> {
             &pooled_embeds,
             None, // img_sizes
             None, // img_ids
+            &config.llama_layers, // llama_layers
         )?;
 
         // Apply classifier-free guidance

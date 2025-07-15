@@ -712,14 +712,56 @@ impl HDModel {
             single_stream_blocks.push(HDBlockSingle::new(inner_dim, config.num_attention_heads, config.attention_head_dim, config.num_routed_experts, config.num_activated_experts, block_vb)?);
         }
         let final_layer = HDLastLayer::new(inner_dim, config.patch_size, config.out_channels, vb.pp("final_layer"))?;
-        let caption_projection = Vec::new();
-        // Add caption projections as per Python
+        
+        // Create caption projection layers as per Python reference
+        // Should have (num_layers + num_single_layers + 1) projection layers
+        // First (num_layers + num_single_layers) layers project LLaMA embeddings (4096 -> inner_dim)
+        // Last layer projects T5 embeddings (text_emb_dim -> inner_dim)
+        let mut caption_projection = Vec::new();
+        
+        // LLaMA projection layers for each double and single block
+        for i in 0..(config.num_layers + config.num_single_layers) {
+            let proj = TextProjection::new(4096, inner_dim, vb.pp(&format!("caption_projection.{}", i)))?;
+            caption_projection.push(proj);
+        }
+        
+        // T5 projection layer (last one)
+        let t5_proj = TextProjection::new(config.text_emb_dim, inner_dim, vb.pp(&format!("caption_projection.{}", config.num_layers + config.num_single_layers)))?;
+        caption_projection.push(t5_proj);
+        
         let max_seq = config.max_resolution.0 * config.max_resolution.1 / (config.patch_size * config.patch_size);
         Ok(Self { t_embedder, p_embedder, x_embedder, pe_embedder, double_stream_blocks, single_stream_blocks, final_layer, caption_projection, max_seq })
     }
 }
 
 impl HDModel {
+    /// Prepare contexts from LLaMA and T5 embeddings using caption projection layers
+    /// This matches the Python reference prepare_contexts method
+    fn prepare_contexts(
+        &self,
+        llama_embeds: &Tensor,  // Shape: [batch, num_llama_layers, seq_len, 4096]
+        t5_embeds: &Tensor,     // Shape: [batch, seq_len, text_emb_dim]
+        llama_layers: &[usize], // Which LLaMA layers to use
+    ) -> Result<Vec<Tensor>> {
+        let (batch_size, _, seq_len, _) = llama_embeds.dims4()?;
+        
+        // Extract specific LLaMA layers as per Python: contexts = [contexts[k] for k in self.llama_layers]
+        let mut contexts = Vec::new();
+        
+        // Process LLaMA embeddings through caption projection layers
+        for (i, &layer_idx) in llama_layers.iter().enumerate() {
+            let llama_layer = llama_embeds.i((.., layer_idx, .., ..))?; // [batch, seq_len, 4096]
+            let projected = self.caption_projection[i].forward(&llama_layer)?; // [batch, seq_len, inner_dim]
+            contexts.push(projected);
+        }
+        
+        // Process T5 embeddings through the last caption projection layer
+        let t5_projected = self.caption_projection.last().unwrap().forward(t5_embeds)?;
+        contexts.push(t5_projected);
+        
+        Ok(contexts)
+    }
+
     pub fn forward_with_cfg(
         &self,
         hidden_states: &Tensor,
@@ -728,8 +770,9 @@ impl HDModel {
         pooled_embeds: &Tensor,
         _img_sizes: Option<&Tensor>,
         img_ids: Option<&Tensor>,
+        llama_layers: &[usize], // Which LLaMA layers to use
     ) -> Result<Tensor> {
-        let (_batch_size, seq_len, _) = hidden_states.dims3()?;
+        let (batch_size, seq_len, _) = hidden_states.dims3()?;
         
         // Store original sequence length for later use
         let img_seq_len = seq_len;
@@ -767,34 +810,59 @@ impl HDModel {
             self.pe_embedder.forward(&ids_tensor)?
         };
         
-        // Process text embeddings
+        // Process text embeddings using prepare_contexts
         let t5_embeds = &encoder_hidden_states[0];
-        let _llama_embeds = if encoder_hidden_states.len() > 1 {
+        let llama_embeds = if encoder_hidden_states.len() > 1 {
             &encoder_hidden_states[1]
         } else {
-            t5_embeds // Fallback if llama embeds not provided
+            // Create dummy LLaMA embeddings if not provided
+            let (_, t5_seq_len, _) = t5_embeds.dims3()?;
+            &Tensor::zeros((batch_size, llama_layers.len(), t5_seq_len, 4096), t5_embeds.dtype(), t5_embeds.device())?
         };
         
-        // Project text embeddings if needed
-        let txt = t5_embeds.clone(); // Use T5 embeddings as primary text
+        // Prepare contexts using caption projection layers
+        let contexts = self.prepare_contexts(llama_embeds, t5_embeds, llama_layers)?;
+        
+        // Initialize text embeddings for double stream
+        // Python: txt_init = torch.cat([contexts[-1], contexts[-2]], dim=-2)
+        let t5_context = &contexts[contexts.len() - 1]; // T5 (last)
+        let llama_last_context = &contexts[contexts.len() - 2]; // Last LLaMA layer
+        let mut txt_init = Tensor::cat(&[t5_context, llama_last_context], 1)?;
+        let txt_init_len = txt_init.dim(1)?;
         
         let mut img = embedded_states;
-        let mut txt = txt;
         
         // Double stream blocks
-        for block in &self.double_stream_blocks {
-            let (new_img, new_txt) = block.forward_dual(&img, &txt, &vec, &pe)?;
+        for (block_idx, block) in self.double_stream_blocks.iter().enumerate() {
+            // Get LLaMA context for this block
+            let txt_llama = &contexts[block_idx];
+            
+            // Concatenate: txt_init + txt_llama (current block's LLaMA embedding)
+            let txt = Tensor::cat(&[&txt_init, txt_llama], 1)?;
+            
+            let (new_img, new_txt_init) = block.forward_dual(&img, &txt, &vec, &pe)?;
             img = new_img;
-            txt = new_txt;
+            
+            // Extract only the txt_init part (first txt_init_len tokens)
+            txt_init = new_txt_init.narrow(1, 0, txt_init_len)?;
         }
         
-        // Concatenate for single stream
-        let combined = Tensor::cat(&[img, txt], 1)?;
-        let mut x = combined;
+        // Concatenate img and txt_init for single stream
+        let mut x = Tensor::cat(&[img, &txt_init], 1)?;
+        let joint_len = x.dim(1)?;
         
         // Single stream blocks
-        for block in &self.single_stream_blocks {
+        for (block_idx, block) in self.single_stream_blocks.iter().enumerate() {
+            // Get LLaMA context for this single block (offset by num_layers)
+            let txt_llama = &contexts[self.double_stream_blocks.len() + block_idx];
+            
+            // Concatenate: x + txt_llama
+            x = Tensor::cat(&[&x, txt_llama], 1)?;
+            
             x = block.forward_with_vec(&x, &vec, &pe)?;
+            
+            // Slice off the txt_llama part, keep only joint_len
+            x = x.narrow(1, 0, joint_len)?;
         }
         
         // Extract image part for final layer
