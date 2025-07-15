@@ -1,3 +1,5 @@
+Error: missing field `activation` at line 171 column 1
+
 # Reference code
 our code:
 @candle-examples/examples/hidream/main.rs 
@@ -107,27 +109,154 @@ let llama_emb = Tensor::zeros((1, 128, 4096), dtype, device)?;
 - [x] Integrate all text encoders (T5, CLIP, LLaMA)
 
 ### Phase 4: Fix Model Forward Pass 🔄 DOING
-- [ ] Debug and fix `forward_with_cfg` implementation
-- [ ] Ensure proper text embedding handling
-- [ ] Fix positional encoding implementation
+- [x] **FIXED**: Basic forward_with_cfg structure implemented
+- [ ] **CRITICAL**: Fix caption projection layers (currently empty Vec)
+- [ ] **CRITICAL**: Implement proper LLaMA embedding processing through layers
+- [ ] **CRITICAL**: Fix patchify/unpatchify logic to match Python reference
+- [ ] **CRITICAL**: Add proper image ID generation for non-square images
+- [ ] **CRITICAL**: Fix text concatenation order (should be T5 + LLaMA for each layer)
+- [ ] **CRITICAL**: Implement proper CFG batching and processing
 - [ ] Add proper attention mask handling
-- [ ] Validate model output shapes
+- [ ] Validate model output shapes and dimensions
 
 ### Phase 5: Integration and Testing ❌
 - [ ] End-to-end pipeline testing
-- [ ] Verify output quality
+- [ ] Verify output quality against Python reference
 - [ ] Performance optimization
 - [ ] Add proper error handling
+- [ ] Add support for non-square image generation
 
-## Current Status: DOING
-**Priority 1**: Fix weight loading from safetensors (Phase 1)
-**Priority 2**: Fix VAE integration (Phase 2)
-**Priority 3**: Implement proper text encoders (Phase 3)
+## Current Status: DOING Phase 4
+**Current Priority**: Fix Model Forward Pass Implementation
 
-## Next Steps Required:
+## Critical Issues Found in Phase 4:
 
-1. **Inspect safetensors structure**: Use tools to examine the actual weight names and shapes
-2. **Fix VarBuilder paths**: Map the weight names to the correct model components  
-3. **Replace random latents**: Use proper VAE encoding for latent initialization
-4. **Implement LLaMA encoder**: Load and use actual LLaMA model for text encoding
-5. **Test model forward pass**: Ensure the model actually produces meaningful outputs
+### A. Caption Projection Missing
+```rust
+// CURRENT: Empty caption projection
+let caption_projection = Vec::new();
+
+// NEED: Proper caption projection layers for LLaMA embeddings
+// Python shows: caption_projection layers process LLaMA through different layers
+// Should have (num_layers + num_single_layers + 1) projection layers
+```
+
+### B. Text Processing Issues
+```rust
+// CURRENT: Simple concatenation
+let txt = t5_embeds.clone();
+
+// NEED: Proper layer-wise LLaMA processing
+// Python shows: contexts = [contexts[k] for k in self.llama_layers]
+// Each layer should get different LLaMA layer embeddings
+```
+
+### C. Patchify/Unpatchify Logic
+```rust
+// CURRENT: Basic patch embedding
+let embedded_states = self.x_embedder.forward(hidden_states)?;
+
+// NEED: Proper patchify logic matching Python
+// Python shows complex padding and reshaping logic
+```
+
+### D. Image ID Generation
+```rust
+// CURRENT: Simple square image assumption
+let h = (seq_len as f64).sqrt() as usize;
+
+// NEED: Proper img_ids generation for arbitrary dimensions
+// Python shows: img_ids with proper height/width handling
+```
+
+## Next Steps Required for Phase 4:
+
+### Immediate Priority (Critical Fixes):
+
+1. **Fix Caption Projection Layers**:
+   - Currently `caption_projection = Vec::new()` in HDModel::new()
+   - Need to create `(num_layers + num_single_layers + 1)` TextProjection layers
+   - Each layer should project from 4096 (LLaMA dim) to 2560 (inner_dim)
+   - Python reference: `caption_projection.append(TextProjection(...))`
+
+2. **Implement LLaMA Layer Processing**:
+   - Current code uses `llama_emb.clone()` for all layers
+   - Need to implement `prepare_contexts()` method from Python
+   - Should extract specific layers from LLaMA: `contexts[k] for k in self.llama_layers`
+   - Each double/single block should get different LLaMA layer embeddings
+
+3. **Fix Text Concatenation Logic**:
+   - Current: Simple T5 embedding usage
+   - Need: Layer-specific concatenation of T5 + LLaMA embeddings
+   - Python shows: `txt_init = torch.cat([contexts[-1], contexts[-2]], dim=-2)`
+   - Then: `txt = torch.cat([txt_init, txt_llama], dim=-2)` for each block
+
+4. **Improve Image ID Generation**:
+   - Current: Assumes square images with `(seq_len as f64).sqrt()`
+   - Need: Proper height/width calculation from actual image dimensions
+   - Python reference shows proper `img_ids` generation with height/width
+
+### Secondary Priority (Improvements):
+
+5. **Fix Patchify/Unpatchify Logic**:
+   - Compare current implementation with Python `patchify()` method
+   - Ensure proper padding and reshaping logic
+   - Handle non-square images correctly
+
+6. **Implement Proper CFG Batching**:
+   - Current CFG logic may not match Python reference
+   - Need to handle negative prompts and batching correctly
+   - Verify guidance scale application
+
+7. **Add Validation and Error Handling**:
+   - Add shape validation at each step
+   - Ensure tensor dimensions match expected values
+   - Add proper error messages for debugging
+
+### Testing Steps:
+
+8. **Unit Testing**:
+   - Test each component individually (caption projection, text processing, etc.)
+   - Verify tensor shapes at each step
+   - Compare intermediate outputs with Python reference if possible
+
+9. **Integration Testing**:
+   - Test full forward pass with simple inputs
+   - Verify output shapes and ranges
+   - Test with different image sizes and prompts
+
+10. **Quality Validation**:
+    - Generate test images and compare with Python implementation
+    - Check for artifacts or quality issues
+    - Validate that CFG is working correctly
+
+## Summary
+
+### ✅ What's Working:
+- **Weight Loading**: Safetensors files load correctly with proper VarBuilder paths
+- **VAE Integration**: Flux VAE loads and can encode/decode images properly
+- **Text Encoders**: T5, CLIP, and LLaMA models load and generate embeddings
+- **Scheduler**: FlowMatch scheduler works for timestep generation
+- **Basic Model Structure**: All model components (blocks, attention, etc.) are implemented
+
+### 🔄 Currently Working On (Phase 4):
+- **Model Forward Pass**: The core inference logic needs several critical fixes
+
+### ❌ Critical Issues Blocking Progress:
+1. **Caption Projection Layers**: Empty Vec instead of proper TextProjection layers
+2. **LLaMA Layer Processing**: Using same embedding for all layers instead of layer-specific
+3. **Text Concatenation**: Simplified logic doesn't match Python reference
+4. **Image ID Generation**: Assumes square images, doesn't handle arbitrary dimensions
+
+### 🎯 Next Action Items:
+1. **Start with Caption Projection**: Fix the empty `caption_projection` Vec in HDModel::new()
+2. **Implement prepare_contexts()**: Add proper LLaMA layer extraction logic
+3. **Fix forward_with_cfg()**: Update text processing to match Python reference
+4. **Test and Validate**: Ensure tensor shapes and outputs are correct
+
+### 📊 Progress Estimate:
+- **Phase 1-3**: ✅ Complete (Weight loading, VAE, Text encoders)
+- **Phase 4**: 🔄 ~30% complete (Basic structure done, critical fixes needed)
+- **Phase 5**: ❌ Not started (Integration testing and optimization)
+
+**Estimated remaining work**: 2-3 days for Phase 4 completion, 1-2 days for Phase 5
