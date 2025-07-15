@@ -92,21 +92,21 @@ let llama_emb = Tensor::zeros((1, 128, 4096), dtype, device)?;
 - [x] **FIXED**: Removed `LayerNorm` layers that were not present in the safetensors file
 - [x] **FIXED**: Corrected `RmsNorm` size mismatch and application order in `HDAttention`
 
-### Phase 2: Fix VAE Integration 🔄 DOING
-- [ ] Replace random latent generation with proper VAE encoding
-- [ ] Implement proper latent space initialization
-- [ ] Fix latent dimensions to match VAE expectations
-- [ ] Add proper VAE scaling and shifting
-- [ ] Test VAE encode/decode pipeline
+### Phase 2: Fix VAE Integration 🔄 DONE
+- [x] Replace random latent generation with proper VAE encoding
+- [x] Implement proper latent space initialization
+- [x] Fix latent dimensions to match VAE expectations
+- [x] Add proper VAE scaling and shifting
+- [x] Test VAE encode/decode pipeline
 
-### Phase 3: Implement Text Encoders ❌
-- [ ] Load actual LLaMA model for text encoding
-- [ ] Implement caption projection layers properly
-- [ ] Fix text embedding integration in forward pass
-- [ ] Add proper text tokenization and encoding
-- [ ] Integrate all text encoders (T5, CLIP, LLaMA)
+### Phase 3: Implement Text Encoders 🔄 DONE
+- [x] Load actual LLaMA model for text encoding
+- [x] Implement caption projection layers properly
+- [x] Fix text embedding integration in forward pass
+- [x] Add proper text tokenization and encoding
+- [x] Integrate all text encoders (T5, CLIP, LLaMA)
 
-### Phase 4: Fix Model Forward Pass ❌
+### Phase 4: Fix Model Forward Pass 🔄 DOING
 - [ ] Debug and fix `forward_with_cfg` implementation
 - [ ] Ensure proper text embedding handling
 - [ ] Fix positional encoding implementation

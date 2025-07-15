@@ -4,7 +4,7 @@ extern crate accelerate_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-use candle_transformers::models::{clip, hidream, t5, flux};
+use candle_transformers::models::{clip, hidream, t5, flux, llama as llama_model};
 
 use anyhow::{Error as E, Result};
 use candle::{IndexOp, Module, Tensor, D};
@@ -244,11 +244,36 @@ fn encode_text_embeddings(
         (pooled_output.clone(), pooled_output) // Using same CLIP model for both embeddings for now
     };
 
-    // Load LLaMA embeddings (placeholder - would need actual LLaMA model)
+    // Load LLaMA embeddings
     let llama_emb = {
-        // For now, create a placeholder tensor with the expected shape
-        // In a real implementation, you'd load the LLaMA model here
-        Tensor::zeros((1, 128, 4096), dtype, device)?
+        let repo = api.repo(hf_hub::Repo::model("meta-llama/Llama-2-7b-hf".to_string()));
+        let model_files = hf_hub::api::sync::Api::new()?
+            .repo(hf_hub::Repo::model("meta-llama/Llama-2-7b-hf".to_string()))
+            .get_filenames()?;
+        let model_files = model_files
+            .iter()
+            .filter(|f| f.ends_with(".safetensors"))
+            .map(|f| repo.get(f).unwrap())
+            .collect::<Vec<_>>();
+
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&model_files, dtype, device)? };
+        let config_filename = repo.get("config.json")?;
+        let config: llama_model::LlamaConfig = serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
+        let config = config.into_config(false);
+
+        let mut model = llama_model::Llama::load(vb, &config)?;
+        let tokenizer_filename = repo.get("tokenizer.json")?;
+        let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
+
+        let mut tokens = tokenizer
+            .encode(prompt, true)
+            .map_err(E::msg)?
+            .get_ids()
+            .to_vec();
+        tokens.resize(128, 0); // Max sequence length for HiDream
+        let input_token_ids = Tensor::new(&tokens[..], device)?.unsqueeze(0)?;
+        let mut cache = llama_model::Cache::new(false, dtype, &config, device)?;
+        model.forward(&input_token_ids, 0, &mut cache)?
     };
 
     // Combine CLIP embeddings
@@ -353,8 +378,8 @@ fn run(args: Args) -> Result<()> {
 
     // Prepare latents using VAE scale factor
     let vae_scale_factor = 8;
-    let latent_height = args.height / vae_scale_factor / 2; // Additional /2 for patch packing
-    let latent_width = args.width / vae_scale_factor / 2;
+    let latent_height = 2 * (args.height / (vae_scale_factor * 2));
+    let latent_width = 2 * (args.width / (vae_scale_factor * 2));
     let mut latents = Tensor::randn(0f32, 1f32, (1, 64, latent_height, latent_width), &device)?
         .to_dtype(dtype)?;
 
