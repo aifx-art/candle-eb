@@ -190,7 +190,7 @@ fn encode_text_embeddings(
     let (clip_emb_1, clip_emb_2) = {
         // First CLIP model (clip_l)
         let model_file_l =
-            text_encoder_repo.get("split_files/text_encoders/clip_l.safetensors")?;
+            text_encoder_repo.get("split_files/text_encoders/clip_l_hidream.safetensors")?;
         let clip1_repo =
             api.repo(hf_hub::Repo::model("openai/clip-vit-large-patch14".to_string()));
         let config_filename1 = clip1_repo.get("config.json")?;
@@ -218,7 +218,7 @@ fn encode_text_embeddings(
 
         // Second CLIP model (clip_g)
         let model_file_g =
-            text_encoder_repo.get("split_files/text_encoders/clip_g.safetensors")?;
+            text_encoder_repo.get("split_files/text_encoders/clip_g_hidream.safetensors")?;
         let clip2_repo = api.repo(hf_hub::Repo::model(
             "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k".to_string(),
         ));
