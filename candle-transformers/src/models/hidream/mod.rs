@@ -7,7 +7,7 @@ pub mod schedulers;
 
 use candle::{DType, IndexOp, Module, Result, Tensor, D};
 use candle_nn::layer_norm::RmsNormNonQuantized;
-use candle_nn::{linear, LayerNorm, Linear, RmsNorm, VarBuilder};
+use candle_nn::{linear, linear_no_bias, LayerNorm, Linear, RmsNorm, VarBuilder};
 use std::vec::Vec;
 
 // Import attention function from flux
@@ -246,9 +246,9 @@ impl HDFeedForwardSwiGLU {
         let mut actual_hidden_dim = (2 * hidden_dim) / 3;
         actual_hidden_dim = multiple_of * ((actual_hidden_dim + multiple_of - 1) / multiple_of);
         
-        let w1 = linear(dim, actual_hidden_dim, vb.pp("w1"))?;
-        let w2 = linear(actual_hidden_dim, dim, vb.pp("w2"))?;
-        let w3 = linear(dim, actual_hidden_dim, vb.pp("w3"))?;
+        let w1 = linear_no_bias(dim, actual_hidden_dim, vb.pp("w1"))?;
+        let w2 = linear_no_bias(actual_hidden_dim, dim, vb.pp("w2"))?;
+        let w3 = linear_no_bias(dim, actual_hidden_dim, vb.pp("w3"))?;
         Ok(Self { w1, w2, w3 })
     }
 }
@@ -338,14 +338,14 @@ struct HDAttention {
     to_k: Linear,
     to_v: Linear,
     to_out: Linear,
-    to_q_t: Linear,
-    to_k_t: Linear,
-    to_v_t: Linear,
-    to_out_t: Linear,
+    to_q_t: Option<Linear>,
+    to_k_t: Option<Linear>,
+    to_v_t: Option<Linear>,
+    to_out_t: Option<Linear>,
     q_rms_norm: RmsNorm<RmsNormNonQuantized>,
     k_rms_norm: RmsNorm<RmsNormNonQuantized>,
-    q_rms_norm_t: RmsNorm<RmsNormNonQuantized>,
-    k_rms_norm_t: RmsNorm<RmsNormNonQuantized>,
+    q_rms_norm_t: Option<RmsNorm<RmsNormNonQuantized>>,
+    k_rms_norm_t: Option<RmsNorm<RmsNormNonQuantized>>,
     heads: usize,
     dim_head: usize,
     single: bool,
@@ -369,20 +369,41 @@ impl HDAttention {
         let q_rms_norm = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("q_rms_norm"))?;
         let k_rms_norm = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("k_rms_norm"))?;
 
-        let to_q_t = linear(query_dim, inner_dim, vb.pp("to_q_t"))?;
-        let to_k_t = linear(inner_dim, inner_dim, vb.pp("to_k_t"))?;
-        let to_v_t = linear(inner_dim, inner_dim, vb.pp("to_v_t"))?;
-        let to_out_t = linear(inner_dim, query_dim, vb.pp("to_out_t"))?;
-
-        let q_rms_norm_t = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("q_rms_norm_t"))?;
-        let k_rms_norm_t = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("k_rms_norm_t"))?;
+        let (to_q_t, to_k_t, to_v_t, to_out_t, q_rms_norm_t, k_rms_norm_t) = if single {
+            (None, None, None, None, None, None)
+        } else {
+            let to_q_t = linear(query_dim, inner_dim, vb.pp("to_q_t"))?;
+            let to_k_t = linear(inner_dim, inner_dim, vb.pp("to_k_t"))?;
+            let to_v_t = linear(inner_dim, inner_dim, vb.pp("to_v_t"))?;
+            let to_out_t = linear(inner_dim, query_dim, vb.pp("to_out_t"))?;
+            let q_rms_norm_t = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("q_rms_norm_t"))?;
+            let k_rms_norm_t = candle_nn::rms_norm_non_quant(inner_dim, 1e-5, vb.pp("k_rms_norm_t"))?;
+            (
+                Some(to_q_t),
+                Some(to_k_t),
+                Some(to_v_t),
+                Some(to_out_t),
+                Some(q_rms_norm_t),
+                Some(k_rms_norm_t),
+            )
+        };
 
         Ok(Self {
-            to_q, to_k, to_v, to_out,
-            to_q_t, to_k_t, to_v_t, to_out_t,
-            q_rms_norm, k_rms_norm,
-            q_rms_norm_t, k_rms_norm_t,
-            heads, dim_head, single,
+            to_q,
+            to_k,
+            to_v,
+            to_out,
+            to_q_t,
+            to_k_t,
+            to_v_t,
+            to_out_t,
+            q_rms_norm,
+            k_rms_norm,
+            q_rms_norm_t,
+            k_rms_norm_t,
+            heads,
+            dim_head,
+            single,
         })
     }
 
@@ -392,16 +413,16 @@ impl HDAttention {
         let k_i = self.to_k.forward(img)?;
         let v_i = self.to_v.forward(img)?;
 
-        // Text stream  
-        let q_t = self.to_q_t.forward(txt)?;
-        let k_t = self.to_k_t.forward(txt)?;
-        let v_t = self.to_v_t.forward(txt)?;
+        // Text stream
+        let q_t = self.to_q_t.as_ref().unwrap().forward(txt)?;
+        let k_t = self.to_k_t.as_ref().unwrap().forward(txt)?;
+        let v_t = self.to_v_t.as_ref().unwrap().forward(txt)?;
 
         // Apply RMS norm
         let q_i = self.q_rms_norm.forward(&q_i)?;
         let k_i = self.k_rms_norm.forward(&k_i)?;
-        let q_t = self.q_rms_norm_t.forward(&q_t)?;
-        let k_t = self.k_rms_norm_t.forward(&k_t)?;
+        let q_t = self.q_rms_norm_t.as_ref().unwrap().forward(&q_t)?;
+        let k_t = self.k_rms_norm_t.as_ref().unwrap().forward(&k_t)?;
 
         // Reshape for multi-head attention
         let (b, seq_i, _) = img.dims3()?;
@@ -430,9 +451,9 @@ impl HDAttention {
         // Apply output projections
         let img_out = img_out.reshape((b, seq_i, self.heads * self.dim_head))?;
         let txt_out = txt_out.reshape((b, seq_t, self.heads * self.dim_head))?;
-        
+
         let img_out = self.to_out.forward(&img_out)?;
-        let txt_out = self.to_out_t.forward(&txt_out)?;
+        let txt_out = self.to_out_t.as_ref().unwrap().forward(&txt_out)?;
 
         Ok((img_out, txt_out))
     }
