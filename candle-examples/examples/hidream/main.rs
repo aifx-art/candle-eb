@@ -269,18 +269,22 @@ fn encode_text_embeddings(
 
     // Load LLaMA embeddings
     let llama_emb = {
+        // Get model weights from Comfy-Org repository
         let model_file = text_encoder_repo
             .get("split_files/text_encoders/llama_3.1_8b_instruct_fp8_scaled.safetensors")?;
 
-        let llama_repo = api.repo(hf_hub::Repo::model(
-            "meta-llama/Meta-Llama-3.1-8B-Instruct".to_string(),
-        ));
-        let tokenizer_filename = llama_repo.get("tokenizer.json")?;
-        let config_filename = llama_repo.get("config.json")?;
+        // Get config and tokenizer from public repositories to avoid 401 errors
+        let tokenizer_filename = api
+            .repo(hf_hub::Repo::model("hf-internal-testing/llama-tokenizer".to_string()))
+            .get("tokenizer.json")?;
+        let config_filename = api
+            .repo(hf_hub::Repo::model("meta-llama/Llama-3.1-8B-Instruct".to_string()))
+            .get("config.json")?;
         let config: llama_model::LlamaConfig =
             serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
         let config = config.into_config(false);
 
+        // Load model with Comfy-Org weights but meta-llama config
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, device)? };
         let model = llama_model::Llama::load(vb, &config)?;
         let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
