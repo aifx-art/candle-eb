@@ -421,8 +421,8 @@ fn run(args: Args) -> Result<()> {
         128,                             // attention_head_dim
         20,                              // num_attention_heads
         2048,                            // text_emb_dim
-        4,                               // num_routed_experts (reduced from 4 to 2)
-        2,                               // num_activated_experts (reduced from 2 to 1)
+        2,                               // num_routed_experts (reduced from 4 to 2)
+        1,                               // num_activated_experts (reduced from 2 to 1)
         10240,                           // intermediate_size (4 * inner_dim = 4 * 20 * 128 = 10240)
         (32, 32),                        // axes_dims_rope
         (128, 128),                      // max_resolution
