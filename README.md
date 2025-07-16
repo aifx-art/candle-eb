@@ -202,6 +202,7 @@ If you have an addition to this list, please submit a pull request.
 
 ## Done
 - [x] **FIXED**: HiDream authentication issue - simplified to use Api::new() like LLaMA example
+- [x] **FIXED**: HiDream CUDA out of memory issue - added proper memory management to clear text processing resources before loading diffusion model
 - [x] Add F8_E4M3 support to safetensors.
 
 <!--- ANCHOR: features --->

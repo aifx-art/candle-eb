@@ -4,7 +4,7 @@ extern crate accelerate_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-use candle_transformers::models::{clip, hidream, t5, flux, llama as llama_model};
+use candle_transformers::models::{clip, flux, hidream, llama as llama_model, t5};
 
 use anyhow::{Error as E, Result};
 use candle::{IndexOp, Module, Tensor, D};
@@ -39,7 +39,7 @@ struct Args {
     width: usize,
 
     /// The model variant to use.
-    #[arg(long, value_enum, default_value = "i1-full-fp8")]
+    #[arg(long, value_enum, default_value = "i1-fast-fp8")]
     model: ModelVariant,
 
     /// The number of inference steps.
@@ -97,13 +97,25 @@ impl ModelVariant {
 
     fn model_filename(&self) -> &'static str {
         match self {
-            ModelVariant::I1FullFp8 => "split_files/diffusion_models/hidream_i1_full_fp8.safetensors",
+            ModelVariant::I1FullFp8 => {
+                "split_files/diffusion_models/hidream_i1_full_fp8.safetensors"
+            }
             ModelVariant::I1DevFp8 => "split_files/diffusion_models/hidream_i1_dev_fp8.safetensors",
-            ModelVariant::I1FastFp8 => "split_files/diffusion_models/hidream_i1_fast_fp8.safetensors",
-            ModelVariant::I1FullFp16 => "split_files/diffusion_models/hidream_i1_full_fp16.safetensors",
-            ModelVariant::I1DevBf16 => "split_files/diffusion_models/hidream_i1_dev_bf16.safetensors",
-            ModelVariant::I1FastBf16 => "split_files/diffusion_models/hidream_i1_fast_bf16.safetensors",
-            ModelVariant::E1FullBf16 => "split_files/diffusion_models/hidream_e1_full_bf16.safetensors",
+            ModelVariant::I1FastFp8 => {
+                "split_files/diffusion_models/hidream_i1_fast_fp8.safetensors"
+            }
+            ModelVariant::I1FullFp16 => {
+                "split_files/diffusion_models/hidream_i1_full_fp16.safetensors"
+            }
+            ModelVariant::I1DevBf16 => {
+                "split_files/diffusion_models/hidream_i1_dev_bf16.safetensors"
+            }
+            ModelVariant::I1FastBf16 => {
+                "split_files/diffusion_models/hidream_i1_fast_bf16.safetensors"
+            }
+            ModelVariant::E1FullBf16 => {
+                "split_files/diffusion_models/hidream_e1_full_bf16.safetensors"
+            }
         }
     }
 
@@ -150,13 +162,14 @@ fn encode_text_embeddings(
     do_classifier_free_guidance: bool,
 ) -> Result<(Tensor, Tensor, Tensor, Tensor)> {
     let api = hf_hub::api::sync::Api::new()?;
-    let text_encoder_repo =
-        api.repo(hf_hub::Repo::model("Comfy-Org/HiDream-I1_ComfyUI".to_string()));
+    let text_encoder_repo = api.repo(hf_hub::Repo::model(
+        "Comfy-Org/HiDream-I1_ComfyUI".to_string(),
+    ));
 
     // Load T5 embeddings
-    let t5_emb = {        
-        let model_file =
-            text_encoder_repo.get("split_files/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors")?;
+    let t5_emb = {
+        let model_file = text_encoder_repo
+            .get("split_files/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors")?;
 
         let t5_repo = api.repo(hf_hub::Repo::with_revision(
             "google/t5-v1_1-xxl".to_string(),
@@ -164,8 +177,7 @@ fn encode_text_embeddings(
             "refs/pr/2".to_string(),
         ));
         let config_filename = t5_repo.get("config.json")?;
-        let config: t5::Config =
-            serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
+        let config: t5::Config = serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
 
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, device)? };
         let mut model = t5::T5EncoderModel::load(vb, &config)?;
@@ -190,22 +202,23 @@ fn encode_text_embeddings(
         // First CLIP model (clip_l) - openai/clip-vit-large-patch14
         let model_file_l =
             text_encoder_repo.get("split_files/text_encoders/clip_l_hidream.safetensors")?;
-        let clip1_repo =
-            api.repo(hf_hub::Repo::model("openai/clip-vit-large-patch14".to_string()));
-        
+        let clip1_repo = api.repo(hf_hub::Repo::model(
+            "openai/clip-vit-large-patch14".to_string(),
+        ));
+
         // Manually construct config instead of deserializing from JSON to avoid missing field issues
         let config1 = clip::text_model::ClipTextConfig {
             vocab_size: 49408,
             embed_dim: 768,
             activation: clip::text_model::Activation::QuickGelu,
             intermediate_size: 3072,
-            max_position_embeddings: 248,  // Updated to match the actual model weights
+            max_position_embeddings: 248, // Updated to match the actual model weights
             pad_with: None,
             num_hidden_layers: 12,
             num_attention_heads: 12,
             projection_dim: 768,
         };
-        
+
         let tokenizer_filename1 = clip1_repo.get("tokenizer.json")?;
         let tokenizer1 = Tokenizer::from_file(tokenizer_filename1).map_err(E::msg)?;
 
@@ -231,20 +244,20 @@ fn encode_text_embeddings(
         let clip2_repo = api.repo(hf_hub::Repo::model(
             "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k".to_string(),
         ));
-        
+
         // Manually construct config for the larger CLIP model
         let config2 = clip::text_model::ClipTextConfig {
             vocab_size: 49408,
-            embed_dim: 1280,  // bigG model has larger embedding dimension
+            embed_dim: 1280, // bigG model has larger embedding dimension
             activation: clip::text_model::Activation::QuickGelu,
-            intermediate_size: 5120,  // 4 * embed_dim
-            max_position_embeddings: 218,  // Updated to match the actual model weights
+            intermediate_size: 5120,      // 4 * embed_dim
+            max_position_embeddings: 218, // Updated to match the actual model weights
             pad_with: None,
-            num_hidden_layers: 32,  // bigG model has more layers
-            num_attention_heads: 20,  // bigG model has more attention heads
+            num_hidden_layers: 32,   // bigG model has more layers
+            num_attention_heads: 20, // bigG model has more attention heads
             projection_dim: 1280,
         };
-        
+
         let tokenizer_filename2 = clip2_repo.get("tokenizer.json")?;
         let tokenizer2 = Tokenizer::from_file(tokenizer_filename2).map_err(E::msg)?;
 
@@ -275,10 +288,14 @@ fn encode_text_embeddings(
 
         // Get config and tokenizer from public repositories to avoid 401 errors
         let tokenizer_filename = api
-            .repo(hf_hub::Repo::model("hf-internal-testing/llama-tokenizer".to_string()))
+            .repo(hf_hub::Repo::model(
+                "hf-internal-testing/llama-tokenizer".to_string(),
+            ))
             .get("tokenizer.json")?;
         let config_filename = api
-            .repo(hf_hub::Repo::model("meta-llama/Llama-3.1-8B-Instruct".to_string()))
+            .repo(hf_hub::Repo::model(
+                "meta-llama/Llama-3.1-8B-Instruct".to_string(),
+            ))
             .get("config.json")?;
         let config: llama_model::LlamaConfig =
             serde_json::from_str(&std::fs::read_to_string(config_filename)?)?;
@@ -353,53 +370,61 @@ fn run(args: Args) -> Result<()> {
         None
     };
 
-    // Encode text embeddings
-    let do_cfg = args
-        .guidance_scale
-        .unwrap_or(args.model.default_guidance_scale())
-        > 1.0;
-    let (t5_emb, llama_emb, pooled_emb, neg_pooled_emb) =
-        encode_text_embeddings(&args.prompt, &args.negative_prompt, &device, dtype, do_cfg)?;
-
-    println!("Text embeddings encoded successfully");
-
-    // Load Flux VAE for proper image encoding/decoding
-    println!("Loading Flux VAE...");
-    let vae_repo = api.repo(hf_hub::Repo::model("black-forest-labs/FLUX.1-dev".to_string()));
-    let vae_file = vae_repo.get("ae.safetensors")?;
-    let vae_vb = unsafe { VarBuilder::from_mmaped_safetensors(&[vae_file], dtype, &device)? };
-    let vae_config = flux::autoencoder::Config::dev();
-    let vae = flux::autoencoder::AutoEncoder::new(&vae_config, vae_vb)?;
-    println!("VAE loaded successfully");
+    // Encode text embeddings in a separate scope to ensure cleanup
+    let (t5_emb, llama_emb, pooled_emb, neg_pooled_emb) = {
+        let do_cfg = args
+            .guidance_scale
+            .unwrap_or(args.model.default_guidance_scale())
+            > 1.0;
+        
+        println!("Encoding text embeddings...");
+        let embeddings = encode_text_embeddings(&args.prompt, &args.negative_prompt, &device, dtype, do_cfg)?;
+        println!("Text embeddings encoded successfully");
+        
+        // Force cleanup of text processing resources
+        println!("Clearing text processing memory...");
+        
+        // Force garbage collection
+        #[cfg(feature = "cuda")]
+        {
+            if let candle::Device::Cuda(cuda_device) = &device {
+                cuda_device.synchronize()?;
+            }
+        }
+        
+        // Force Rust garbage collection
+        std::hint::black_box(());
+        
+        embeddings
+    }; // Text processing scope ends here, allowing cleanup
+    
+    println!("Memory cleared, loading HiDream model...");
 
     // Load HiDream model from the new Comfy-Org repository structure
     println!("Loading model file: {}", args.model.model_filename());
     let model_file = repo.get(args.model.model_filename())?;
-    
+
     let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, &device)? };
 
     // Create HiDream model config based on the variant
     let config = hidream::Config::new(
-        1, // patch_size
-        64, // in_channels
-        64, // out_channels
-        16, // num_layers
-        32, // num_single_layers
-        128, // attention_head_dim
-        20, // num_attention_heads
-        2048, // text_emb_dim
-        4, // num_routed_experts
-        2, // num_activated_experts
-        10240, // intermediate_size (4 * inner_dim = 4 * 20 * 128 = 10240)
-        (32, 32), // axes_dims_rope
-        (128, 128), // max_resolution
-        (0..48).collect::<Vec<usize>>() // llama_layers
+        1,                               // patch_size
+        64,                              // in_channels
+        64,                              // out_channels
+        16,                              // num_layers
+        32,                              // num_single_layers
+        128,                             // attention_head_dim
+        20,                              // num_attention_heads
+        2048,                            // text_emb_dim
+        4,                               // num_routed_experts
+        2,                               // num_activated_experts
+        10240,                           // intermediate_size (4 * inner_dim = 4 * 20 * 128 = 10240)
+        (32, 32),                        // axes_dims_rope
+        (128, 128),                      // max_resolution
+        (0..48).collect::<Vec<usize>>(), // llama_layers
     );
-    
+
     // Load the HiDream model
-    println!("Loading HiDream model...");
-    let model = hidream::HDModel::new(&config, vb)?;
-    println!("HiDream model loaded successfully");
 
     // Prepare latents using VAE scale factor
     let vae_scale_factor = 8;
@@ -407,98 +432,140 @@ fn run(args: Args) -> Result<()> {
     let latent_width = 2 * (args.width / (vae_scale_factor * 2));
     let mut latents = Tensor::randn(0f32, 1f32, (1, 64, latent_height, latent_width), &device)?
         .to_dtype(dtype)?;
+    {
+        println!("Loading HiDream model...");
+        let model = hidream::HDModel::new(&config, vb)?;
+        println!("HiDream model loaded successfully");
 
-    println!("Starting generation with {} steps...", args.num_inference_steps.unwrap_or(args.model.default_steps()));
+        println!(
+            "Starting generation with {} steps...",
+            args.num_inference_steps
+                .unwrap_or(args.model.default_steps())
+        );
 
-    // Initialize scheduler
-    let num_steps = args.num_inference_steps.unwrap_or(args.model.default_steps());
-    let guidance_scale = args.guidance_scale.unwrap_or(args.model.default_guidance_scale());
-    
-    let mut scheduler = hidream::schedulers::FlowMatchEulerDiscreteScheduler::new(
-        1000, // num_train_timesteps
-        3.0,  // shift
-        false // use_dynamic_shifting
-    );
-    scheduler.set_timesteps(num_steps, &device)?;
-    let timesteps = scheduler.get_timesteps(&device, dtype)?;
+        // Initialize scheduler
+        let num_steps = args
+            .num_inference_steps
+            .unwrap_or(args.model.default_steps());
+        let guidance_scale = args
+            .guidance_scale
+            .unwrap_or(args.model.default_guidance_scale());
 
-    // Encode input image if provided (for editing models)
-    let input_latents = if let Some(input_img) = input_image {
-        println!("Encoding input image...");
-        let encoded = vae.encode(&input_img)?;
-        Some(encoded)
-    } else {
-        None
-    };
+        let mut scheduler = hidream::schedulers::FlowMatchEulerDiscreteScheduler::new(
+            1000,  // num_train_timesteps
+            3.0,   // shift
+            false, // use_dynamic_shifting
+        );
+        scheduler.set_timesteps(num_steps, &device)?;
+        let timesteps = scheduler.get_timesteps(&device, dtype)?;
 
-    // Generation loop with actual model forward passes
-    for (step, timestep) in timesteps.to_vec1::<f32>()?.iter().enumerate() {
-        println!("Step {}/{} (timestep: {:.2})", step + 1, num_steps, timestep);
+        // Encode input image if provided (for editing models)
+        let input_latents = if let Some(input_img) = input_image {
+            // Load Flux VAE for proper image encoding/decoding
+            println!("Loading Flux VAE...");
+            let vae_repo = api.repo(hf_hub::Repo::model(
+                "black-forest-labs/FLUX.1-dev".to_string(),
+            ));
+            let vae_file = vae_repo.get("ae.safetensors")?;
+            let vae_vb =
+                unsafe { VarBuilder::from_mmaped_safetensors(&[vae_file], dtype, &device)? };
+            let vae_config = flux::autoencoder::Config::dev();
+            let vae = flux::autoencoder::AutoEncoder::new(&vae_config, vae_vb)?;
+            println!("VAE loaded successfully");
 
-        let timestep_tensor = Tensor::new(&[*timestep], &device)?.to_dtype(dtype)?;
-        
-        // Prepare model inputs
-        let latent_model_input = if guidance_scale > 1.0 {
-            // Classifier-free guidance: duplicate latents
-            Tensor::cat(&[&latents, &latents], 0)?
+            println!("Encoding input image...");
+            let encoded = vae.encode(&input_img)?;
+            Some(encoded)
         } else {
-            latents.clone()
+            None
         };
 
-        // Prepare text embeddings for CFG
-        let (encoder_hidden_states, pooled_embeds) = if guidance_scale > 1.0 {
-            let t5_combined = Tensor::cat(&[&neg_pooled_emb, &t5_emb], 0)?;
-            let llama_combined = Tensor::cat(&[&llama_emb, &llama_emb], 0)?;
-            let pooled_combined = Tensor::cat(&[&neg_pooled_emb, &pooled_emb], 0)?;
-            (vec![t5_combined, llama_combined], pooled_combined)
-        } else {
-            (vec![t5_emb.clone(), llama_emb.clone()], pooled_emb.clone())
-        };
+        // Generation loop with actual model forward passes
+        for (step, timestep) in timesteps.to_vec1::<f32>()?.iter().enumerate() {
+            println!(
+                "Step {}/{} (timestep: {:.2})",
+                step + 1,
+                num_steps,
+                timestep
+            );
 
-        // Concatenate input image latents for editing models
-        let model_input = if let Some(ref input_lats) = input_latents {
-            Tensor::cat(&[&latent_model_input, input_lats], D::Minus1)?
-        } else {
-            latent_model_input
-        };
+            let timestep_tensor = Tensor::new(&[*timestep], &device)?.to_dtype(dtype)?;
 
-        // Forward pass through the model
-        let noise_pred = model.forward_with_cfg(
-            &model_input,
-            &timestep_tensor,
-            &encoder_hidden_states,
-            &pooled_embeds,
-            None, // img_sizes
-            None, // img_ids
-            &config.llama_layers, // llama_layers
-        )?;
+            // Prepare model inputs
+            let latent_model_input = if guidance_scale > 1.0 {
+                // Classifier-free guidance: duplicate latents
+                Tensor::cat(&[&latents, &latents], 0)?
+            } else {
+                latents.clone()
+            };
 
-        // Apply classifier-free guidance
-        let noise_pred = if guidance_scale > 1.0 {
-            let chunks = noise_pred.chunk(2, 0)?;
-            let noise_pred_uncond = &chunks[0];
-            let noise_pred_text = &chunks[1];
-            let guidance_tensor = Tensor::new(&[guidance_scale as f32], &device)?.to_dtype(dtype)?;
-            let guidance_tensor = guidance_tensor.broadcast_as(noise_pred_text.shape())?;
-            
-            (noise_pred_uncond + &((noise_pred_text - noise_pred_uncond)? * &guidance_tensor)?)?
-        } else {
-            noise_pred
-        };
+            // Prepare text embeddings for CFG
+            let (encoder_hidden_states, pooled_embeds) = if guidance_scale > 1.0 {
+                let t5_combined = Tensor::cat(&[&neg_pooled_emb, &t5_emb], 0)?;
+                let llama_combined = Tensor::cat(&[&llama_emb, &llama_emb], 0)?;
+                let pooled_combined = Tensor::cat(&[&neg_pooled_emb, &pooled_emb], 0)?;
+                (vec![t5_combined, llama_combined], pooled_combined)
+            } else {
+                (vec![t5_emb.clone(), llama_emb.clone()], pooled_emb.clone())
+            };
 
-        // Scheduler step
-        latents = scheduler.step(&noise_pred, *timestep as f64, &latents)?;
+            // Concatenate input image latents for editing models
+            let model_input = if let Some(ref input_lats) = input_latents {
+                Tensor::cat(&[&latent_model_input, input_lats], D::Minus1)?
+            } else {
+                latent_model_input
+            };
+
+            // Forward pass through the model
+            let noise_pred = model.forward_with_cfg(
+                &model_input,
+                &timestep_tensor,
+                &encoder_hidden_states,
+                &pooled_embeds,
+                None,                 // img_sizes
+                None,                 // img_ids
+                &config.llama_layers, // llama_layers
+            )?;
+
+            // Apply classifier-free guidance
+            let noise_pred = if guidance_scale > 1.0 {
+                let chunks = noise_pred.chunk(2, 0)?;
+                let noise_pred_uncond = &chunks[0];
+                let noise_pred_text = &chunks[1];
+                let guidance_tensor =
+                    Tensor::new(&[guidance_scale as f32], &device)?.to_dtype(dtype)?;
+                let guidance_tensor = guidance_tensor.broadcast_as(noise_pred_text.shape())?;
+
+                (noise_pred_uncond + &((noise_pred_text - noise_pred_uncond)? * &guidance_tensor)?)?
+            } else {
+                noise_pred
+            };
+
+            // Scheduler step
+            latents = scheduler.step(&noise_pred, *timestep as f64, &latents)?;
+        }
     }
-
     println!("Generation completed, decoding latents...");
 
     // Decode latents to image using VAE
     let vae_scale_factor = 0.3611; // Flux VAE scale factor
     let vae_shift_factor = 0.1159; // Flux VAE shift factor
-    
+
     let scaled_latents = ((&latents / vae_scale_factor)? + vae_shift_factor)?;
+
+    // Load Flux VAE for proper image encoding/decoding
+    println!("Loading Flux VAE...");
+    let vae_repo = api.repo(hf_hub::Repo::model(
+        "black-forest-labs/FLUX.1-dev".to_string(),
+    ));
+    let vae_file = vae_repo.get("ae.safetensors")?;
+    let vae_vb = unsafe { VarBuilder::from_mmaped_safetensors(&[vae_file], dtype, &device)? };
+    let vae_config = flux::autoencoder::Config::dev();
+    let vae = flux::autoencoder::AutoEncoder::new(&vae_config, vae_vb)?;
+    println!("VAE loaded successfully");
+
     let decoded_image = vae.decode(&scaled_latents)?;
-    
+
     // Post-process image
     let img = decoded_image.clamp(-1f32, 1f32)?;
     let img = ((&img + 1.0)? * 127.5)?;
