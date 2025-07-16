@@ -1,4 +1,16 @@
-Error: missing field `activation` at line 171 column 1
+we are still running out of memory. what else is loaded when we load the model. it looks like 3 gigs is still being used but its hard to tell. 
+    Running `target/release/examples/hidream --model i1-full-fp8 --prompt 'super donkey'`
+Encoding text embeddings...
+CLIP emb 1 shape: [1, 768]
+CLIP emb 2 shape: [1, 1280]
+Combined pooled emb shape: [1, 2048]
+Text embeddings encoded successfully
+Clearing text processing memory...
+Memory cleared, loading HiDream model...
+Loading model file: split_files/diffusion_models/hidream_i1_full_fp8.safetensors
+Loading HiDream model...
+Error: DriverError(CUDA_ERROR_OUT_OF_MEMORY, "out of memory")
+
 
 # Reference code
 our code:
