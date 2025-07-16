@@ -720,6 +720,7 @@ pub struct HDModel {
     final_layer: HDLastLayer,
     caption_projection: Vec<TextProjection>,
     max_seq: usize,
+    cpu_offload: bool,
 }
 
 impl HDModel {
@@ -758,7 +759,7 @@ impl HDModel {
         caption_projection.push(t5_proj);
         
         let max_seq = config.max_resolution.0 * config.max_resolution.1 / (config.patch_size * config.patch_size);
-        Ok(Self { t_embedder, p_embedder, x_embedder, pe_embedder, double_stream_blocks, single_stream_blocks, final_layer, caption_projection, max_seq })
+        Ok(Self { t_embedder, p_embedder, x_embedder, pe_embedder, double_stream_blocks, single_stream_blocks, final_layer, caption_projection, max_seq, cpu_offload: false })
     }
 }
 

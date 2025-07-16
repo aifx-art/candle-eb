@@ -69,6 +69,10 @@ struct Args {
     /// Output filename.
     #[arg(long, default_value = "hidream_output.jpg")]
     output: String,
+
+    /// Enable CPU offloading to reduce GPU memory usage.
+    #[arg(long)]
+    cpu_offload: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq)]
@@ -421,8 +425,8 @@ fn run(args: Args) -> Result<()> {
         128,                             // attention_head_dim
         20,                              // num_attention_heads
         2048,                            // text_emb_dim
-        2,                               // num_routed_experts (reduced from 4 to 2)
-        1,                               // num_activated_experts (reduced from 2 to 1)
+        4,                               // num_routed_experts (back to original 4)
+        2,                               // num_activated_experts (back to original 2)
         10240,                           // intermediate_size (4 * inner_dim = 4 * 20 * 128 = 10240)
         (32, 32),                        // axes_dims_rope
         (128, 128),                      // max_resolution
