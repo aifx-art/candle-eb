@@ -353,7 +353,12 @@ fn run(args: Args) -> Result<()> {
     if let Some(seed) = args.seed {
         device.set_seed(seed)?;
     }
-    let dtype = device.bf16_default_to_f32();
+    // Force FP16 to reduce memory usage instead of BF16/FP32
+    let dtype = if args.cpu {
+        candle::DType::F32
+    } else {
+        candle::DType::F16
+    };
 
     // Validate arguments
     if args.model.is_editing_model() && args.input_image.is_none() {
@@ -416,8 +421,8 @@ fn run(args: Args) -> Result<()> {
         128,                             // attention_head_dim
         20,                              // num_attention_heads
         2048,                            // text_emb_dim
-        4,                               // num_routed_experts
-        2,                               // num_activated_experts
+        4,                               // num_routed_experts (reduced from 4 to 2)
+        2,                               // num_activated_experts (reduced from 2 to 1)
         10240,                           // intermediate_size (4 * inner_dim = 4 * 20 * 128 = 10240)
         (32, 32),                        // axes_dims_rope
         (128, 128),                      // max_resolution
