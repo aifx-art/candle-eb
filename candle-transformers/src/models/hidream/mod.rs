@@ -239,9 +239,16 @@ struct HDFeedForwardSwiGLU {
 
 impl HDFeedForwardSwiGLU {
     fn new(dim: usize, hidden_dim: usize, vb: VarBuilder) -> Result<Self> {
-        let w1 = linear(dim, hidden_dim, vb.pp("w1"))?;
-        let w2 = linear(hidden_dim, dim, vb.pp("w2"))?;
-        let w3 = linear(dim, hidden_dim, vb.pp("w3"))?;
+        // Apply the same transformation as in Python reference:
+        // hidden_dim = int(2 * hidden_dim / 3)
+        // hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+        let multiple_of = 256;
+        let mut actual_hidden_dim = (2 * hidden_dim) / 3;
+        actual_hidden_dim = multiple_of * ((actual_hidden_dim + multiple_of - 1) / multiple_of);
+        
+        let w1 = linear(dim, actual_hidden_dim, vb.pp("w1"))?;
+        let w2 = linear(actual_hidden_dim, dim, vb.pp("w2"))?;
+        let w3 = linear(dim, actual_hidden_dim, vb.pp("w3"))?;
         Ok(Self { w1, w2, w3 })
     }
 }

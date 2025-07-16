@@ -133,7 +133,20 @@ let llama_emb = Tensor::zeros((1, 128, 4096), dtype, device)?;
 - [ ] Add support for non-square image generation
 
 ## Current Status: DOING Phase 4
-**Current Priority**: Fix Patchify/Unpatchify Logic (Step 3 of 4)
+**Current Priority**: Fix Model Configuration Mismatch (Critical Issue)
+
+### CRITICAL ISSUE FOUND:
+Shape mismatch error: `double_stream_blocks.0.block.ff_i.shared_experts.w1.weight, expected: [5120, 2560], got: [3584, 2560]`
+
+**Root Cause**: Model configuration doesn't match actual safetensors weights structure
+- Current config: `hidden_dim / 2 = 5120` (from `4 * dim / 2 = 4 * 2560 / 2`)  
+- Actual weights: `3584` (from safetensors file)
+- This suggests either wrong `intermediate_size` config or wrong calculation in `HDMOEFeedForwardSwiGLU`
+
+**Next Steps**: 
+1. Inspect safetensors structure to determine correct dimensions
+2. Fix model configuration to match actual weights
+3. Continue with remaining Phase 4 tasks
 
 ## Critical Issues Found in Phase 4:
 
