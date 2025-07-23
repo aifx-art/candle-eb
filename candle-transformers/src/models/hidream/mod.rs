@@ -4,6 +4,8 @@
 //! Based on the provided Python reference and Flux implementation.
 
 pub mod schedulers;
+#[cfg(feature = "quantized")]
+pub mod quantized_model;
 
 use candle::{DType, IndexOp, Module, Result, Tensor, D};
 use candle_nn::layer_norm::RmsNormNonQuantized;
