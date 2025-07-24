@@ -1,7 +1,7 @@
-use super::{timestep_embedding, EmbedNd, Config};
-use crate::quantized_nn::{linear, linear_b, Linear};
+use super::{timestep_embedding, EmbedNd, Config, attention, topk, repeat_interleave, mask_where, masked_fill};
+use crate::quantized_nn::{linear, linear_b, linear_no_bias, Linear};
 use crate::quantized_var_builder::VarBuilder;
-use candle::{DType, IndexOp, Result, Tensor, D};
+use candle::{DType, IndexOp, Result, Tensor, D, Module};
 use candle_nn::layer_norm::RmsNormNonQuantized;
 use candle_nn::{LayerNorm, RmsNorm};
 
@@ -18,8 +18,79 @@ pub struct MlpEmbedder {
 
 impl MlpEmbedder {
     fn new(in_sz: usize, h_sz: usize, vb: VarBuilder) -> Result<Self> {
-        let in_layer = linear(in_sz, h_sz, vb.pp("in_layer"))?;
-        let out_layer = linear(h_sz, h_sz, vb.pp("out_layer"))?;
+        println!("Loading MlpEmbedder: in_sz={}, h_sz={}", in_sz, h_sz);
+        
+        // Debug: Print available tensor names in this scope
+        println!("  🔍 Debugging tensor names in MlpEmbedder scope:");
+        let debug_vb = vb.clone();
+        
+        // Try different possible tensor name patterns for in_layer
+        let in_layer = if let Ok(layer) = linear(in_sz, h_sz, vb.pp("in_layer")) {
+            println!("  ✓ in_layer loaded with bias");
+            layer
+        } else if let Ok(layer) = linear_no_bias(in_sz, h_sz, vb.pp("in_layer")) {
+            println!("  ✓ in_layer loaded without bias");
+            layer
+        } else {
+            // Try alternative tensor names that might exist in GGUF
+            let alt_names = ["linear_1", "proj_in", "in_proj", "input_layer", "0"];
+            let mut found = false;
+            let mut layer = None;
+            
+            for alt_name in &alt_names {
+                if let Ok(l) = linear_no_bias(in_sz, h_sz, vb.pp(alt_name)) {
+                    println!("  ✓ in_layer found with alternative name: {}", alt_name);
+                    layer = Some(l);
+                    found = true;
+                    break;
+                }
+            }
+            
+            if !found {
+                println!("  ❌ Could not find in_layer with any known name pattern");
+                return Err(candle::Error::Msg(format!(
+                    "Cannot find tensor for in_layer. Tried: in_layer, {}",
+                    alt_names.join(", ")
+                )));
+            }
+            
+            layer.unwrap()
+        };
+        
+        // Try different possible tensor name patterns for out_layer
+        let out_layer = if let Ok(layer) = linear(h_sz, h_sz, vb.pp("out_layer")) {
+            println!("  ✓ out_layer loaded with bias");
+            layer
+        } else if let Ok(layer) = linear_no_bias(h_sz, h_sz, vb.pp("out_layer")) {
+            println!("  ✓ out_layer loaded without bias");
+            layer
+        } else {
+            // Try alternative tensor names that might exist in GGUF
+            let alt_names = ["linear_2", "proj_out", "out_proj", "output_layer", "2"];
+            let mut found = false;
+            let mut layer = None;
+            
+            for alt_name in &alt_names {
+                if let Ok(l) = linear_no_bias(h_sz, h_sz, vb.pp(alt_name)) {
+                    println!("  ✓ out_layer found with alternative name: {}", alt_name);
+                    layer = Some(l);
+                    found = true;
+                    break;
+                }
+            }
+            
+            if !found {
+                println!("  ❌ Could not find out_layer with any known name pattern");
+                return Err(candle::Error::Msg(format!(
+                    "Cannot find tensor for out_layer. Tried: out_layer, {}",
+                    alt_names.join(", ")
+                )));
+            }
+            
+            layer.unwrap()
+        };
+        
+        println!("  ✓ MlpEmbedder loaded successfully");
         Ok(Self {
             in_layer,
             out_layer,
@@ -269,7 +340,7 @@ impl HDAttention {
         let v = Tensor::cat(&[v_i, v_t], 1)?;
 
         // Apply attention with positional encoding
-        let attn_out = super::attention(&q, &k, &v, pe)?;
+        let attn_out = attention(&q, &k, &v, pe)?;
         
         // Split back to image and text streams
         let img_out = attn_out.narrow(1, 0, seq_i)?;
@@ -298,7 +369,7 @@ impl HDAttention {
         let q = q.apply(&self.q_norm.query_norm)?;
         let k = k.apply(&self.k_norm.key_norm)?;
 
-        let attn_out = super::attention(&q, &k, &v, pe)?;
+        let attn_out = attention(&q, &k, &v, pe)?;
         let attn_out = attn_out.reshape((b, seq, self.num_heads * self.head_dim))?;
         self.to_out.forward(&attn_out)
     }
@@ -352,7 +423,7 @@ impl HDMoEGate {
     fn forward(&self, x: &Tensor) -> Result<(Tensor, Tensor)> {
         let logits = x.matmul(&self.weight.t()?)?;
         let scores = candle_nn::ops::softmax(&logits, D::Minus1)?;
-        super::topk(&scores, self.top_k, -1)
+        topk(&scores, self.top_k, -1)
     }
 }
 
@@ -388,16 +459,16 @@ impl candle::Module for HDMOEFeedForwardSwiGLU {
         let y_shared = self.shared_experts.forward(x)?;
         let (topk_weight, topk_idx) = self.gate.forward(x)?;
         let tk_idx_flat = topk_idx.flatten_all()?.to_dtype(DType::U32)?;
-        let x_repeated = super::repeat_interleave(x, self.num_activated_experts, 0)?;
+        let x_repeated = repeat_interleave(x, self.num_activated_experts, 0)?;
         let mut y = Tensor::zeros(x_repeated.shape(), x.dtype(), x.device())?;
         for (i, expert) in self.experts.iter().enumerate() {
             let mask = tk_idx_flat.eq(&Tensor::new(i as u32, x.device())?)?;
-            let x_sel = super::mask_where(&x_repeated, &mask.broadcast_as(x_repeated.shape())?, &Tensor::zeros(x_repeated.shape(), x.dtype(), x.device())?)?;
+            let x_sel = mask_where(&x_repeated, &mask.broadcast_as(x_repeated.shape())?, &Tensor::zeros(x_repeated.shape(), x.dtype(), x.device())?)?;
             if x_sel.dim(0)? == 0 {
                 continue;
             }
             let expert_out = expert.forward(&x_sel)?;
-            y = super::masked_fill(&y, &mask.broadcast_as(y.shape())?, &expert_out)?;
+            y = masked_fill(&y, &mask.broadcast_as(y.shape())?, &expert_out)?;
         }
         let y_reshaped = y.reshape((topk_weight.dims()[0], topk_weight.dims()[1], self.num_activated_experts, y.dims()[2]))?;
         let y_sum = topk_weight.unsqueeze(2)?.matmul(&y_reshaped)?.squeeze(2)?;
@@ -420,7 +491,7 @@ pub struct HDDoubleStreamBlock {
 impl HDDoubleStreamBlock {
     fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
         let inner_dim = cfg.num_attention_heads * cfg.attention_head_dim;
-        let ada_ln_modulation = Modulation12::new(inner_dim, vb)?;
+        let ada_ln_modulation = Modulation12::new(inner_dim, vb.clone())?;
         let img_norm1 = layer_norm(inner_dim, vb.pp("norm1_i"))?;
         let img_norm2 = layer_norm(inner_dim, vb.pp("norm3_i"))?;
         let txt_norm1 = layer_norm(inner_dim, vb.pp("norm1_t"))?;
@@ -496,7 +567,7 @@ pub struct HDSingleStreamBlock {
 impl HDSingleStreamBlock {
     fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
         let inner_dim = cfg.num_attention_heads * cfg.attention_head_dim;
-        let ada_ln_modulation = Modulation1::new(inner_dim, vb)?;
+        let ada_ln_modulation = Modulation1::new(inner_dim, vb.clone())?;
         let norm1 = layer_norm(inner_dim, vb.pp("norm1_i"))?;
         let norm2 = layer_norm(inner_dim, vb.pp("norm3_i"))?;
         let attn1 = HDAttention::new(inner_dim, cfg.num_attention_heads, cfg.attention_head_dim, true, vb.pp("attn1"))?;
@@ -522,7 +593,7 @@ impl HDSingleStreamBlock {
         // Feed forward block
         let x_norm = x.apply(&self.norm2)?;
         let x_norm = modulation.scale_shift(&x_norm)?;
-        let x_ff = self.ff_i.forward(&x_norm)?;
+        let x_ff = x_norm.apply(&self.ff_i)?;
         let x = (x + modulation.gate(&x_ff)?)?;
 
         Ok(x)
@@ -607,45 +678,95 @@ pub struct HDQuantizedModel {
 
 impl HDQuantizedModel {
     pub fn new(cfg: &Config, vb: VarBuilder) -> Result<Self> {
+        println!("🚀 Initializing HDQuantizedModel with config:");
+        println!("  - num_layers: {}", cfg.num_layers);
+        println!("  - num_single_layers: {}", cfg.num_single_layers);
+        println!("  - num_attention_heads: {}", cfg.num_attention_heads);
+        println!("  - attention_head_dim: {}", cfg.attention_head_dim);
+        println!("  - in_channels: {}", cfg.in_channels);
+        println!("  - out_channels: {}", cfg.out_channels);
+        println!("  - text_emb_dim: {}", cfg.text_emb_dim);
+        
         let inner_dim = cfg.num_attention_heads * cfg.attention_head_dim;
-        let x_embedder = linear(cfg.in_channels, inner_dim, vb.pp("x_embedder.proj"))?;
+        println!("  - inner_dim: {}", inner_dim);
+        
+        // Debug: List all available tensor names in the GGUF file
+        println!("\n🔍 DEBUG: Available tensor names in GGUF file:");
+        Self::debug_tensor_names(&vb);
+        
+        println!("\n📦 Loading x_embedder...");
+        let x_embedder = match linear(cfg.in_channels, inner_dim, vb.pp("x_embedder.proj")) {
+            Ok(emb) => {
+                println!("  ✓ x_embedder loaded successfully");
+                emb
+            }
+            Err(e) => {
+                println!("  ⚠ x_embedder failed with bias, trying without bias: {}", e);
+                linear_no_bias(cfg.in_channels, inner_dim, vb.pp("x_embedder.proj"))?
+            }
+        };
+        
+        println!("\n📦 Loading t_embedder...");
         let t_embedder = MlpEmbedder::new(256, inner_dim, vb.pp("t_embedder"))?;
+        
+        println!("\n📦 Loading p_embedder...");
         let p_embedder = MlpEmbedder::new(cfg.text_emb_dim, inner_dim, vb.pp("p_embedder"))?;
         
+        println!("\n📦 Loading {} double stream blocks...", cfg.num_layers);
         let mut double_blocks = Vec::with_capacity(cfg.num_layers);
         let vb_d = vb.pp("double_stream_blocks");
         for idx in 0..cfg.num_layers {
+            println!("  Loading double block {}/{}...", idx + 1, cfg.num_layers);
             let db = HDDoubleStreamBlock::new(cfg, vb_d.pp(idx).pp("block"))?;
-            double_blocks.push(db)
+            double_blocks.push(db);
+            println!("  ✓ Double block {} loaded", idx + 1);
         }
         
+        println!("\n📦 Loading {} single stream blocks...", cfg.num_single_layers);
         let mut single_blocks = Vec::with_capacity(cfg.num_single_layers);
         let vb_s = vb.pp("single_stream_blocks");
         for idx in 0..cfg.num_single_layers {
+            println!("  Loading single block {}/{}...", idx + 1, cfg.num_single_layers);
             let sb = HDSingleStreamBlock::new(cfg, vb_s.pp(idx).pp("block"))?;
-            single_blocks.push(sb)
+            single_blocks.push(sb);
+            println!("  ✓ Single block {} loaded", idx + 1);
         }
         
+        println!("\n📦 Loading final layer...");
         let final_layer = HDLastLayer::new(inner_dim, cfg.patch_size, cfg.out_channels, vb.pp("final_layer"))?;
+        println!("  ✓ Final layer loaded");
         
         // Create caption projection layers as per Python reference
         // Should have (num_layers + num_single_layers + 1) projection layers
         // First (num_layers + num_single_layers) layers project LLaMA embeddings (4096 -> inner_dim)
         // Last layer projects T5 embeddings (text_emb_dim -> inner_dim)
+        println!("\n📦 Loading caption projection layers...");
+        let total_proj_layers = cfg.num_layers + cfg.num_single_layers + 1;
+        println!("  Total projection layers needed: {}", total_proj_layers);
         let mut caption_projection = Vec::new();
         
         // LLaMA projection layers for each double and single block
         for i in 0..(cfg.num_layers + cfg.num_single_layers) {
+            println!("  Loading LLaMA projection layer {}/{}...", i + 1, cfg.num_layers + cfg.num_single_layers);
             let proj = TextProjection::new(4096, inner_dim, vb.pp(&format!("caption_projection.{}", i)))?;
             caption_projection.push(proj);
+            println!("  ✓ LLaMA projection layer {} loaded", i + 1);
         }
         
         // T5 projection layer (last one)
+        println!("  Loading T5 projection layer...");
         let t5_proj = TextProjection::new(cfg.text_emb_dim, inner_dim, vb.pp(&format!("caption_projection.{}", cfg.num_layers + cfg.num_single_layers)))?;
         caption_projection.push(t5_proj);
+        println!("  ✓ T5 projection layer loaded");
         
+        println!("\n📦 Initializing positional embedder...");
         let pe_embedder = EmbedNd::new(10000, vec![cfg.axes_dims_rope.0, cfg.axes_dims_rope.1]);
         let max_seq = cfg.max_resolution.0 * cfg.max_resolution.1 / (cfg.patch_size * cfg.patch_size);
+        println!("  ✓ Positional embedder initialized (max_seq: {})", max_seq);
+        
+        println!("\n🎉 HDQuantizedModel loaded successfully!");
+        println!("  - Total parameters loaded: {} components", 
+                 1 + 1 + 1 + double_blocks.len() + single_blocks.len() + 1 + caption_projection.len());
         
         Ok(Self {
             x_embedder,
@@ -707,7 +828,7 @@ impl WithForward for HDQuantizedModel {
                 (1, seq_len, 3),
                 embedded_states.device(),
             )?;
-            self.pe_embedder.forward(&ids_tensor)?
+            ids_tensor.apply(&self.pe_embedder)?
         };
         
         // Process text embeddings using prepare_contexts
@@ -776,6 +897,71 @@ impl WithForward for HDQuantizedModel {
 }
 
 impl HDQuantizedModel {
+    /// Debug function to test common tensor name patterns
+    fn debug_tensor_names(vb: &VarBuilder) {
+        println!("  🔍 Testing common tensor name patterns:");
+        
+        // Test common patterns for t_embedder
+        let t_embedder_patterns = [
+            "t_embedder.in_layer.weight",
+            "t_embedder.in_layer.bias", 
+            "t_embedder.out_layer.weight",
+            "t_embedder.out_layer.bias",
+            "time_embedder.in_layer.weight",
+            "time_embedder.out_layer.weight",
+            "timestep_embedder.in_layer.weight",
+            "timestep_embedder.out_layer.weight",
+            "t_emb.in_layer.weight",
+            "t_emb.out_layer.weight",
+        ];
+        
+        println!("    Testing t_embedder patterns:");
+        for pattern in &t_embedder_patterns {
+            if vb.contains_key(pattern) {
+                println!("      ✓ Found: {}", pattern);
+            } else {
+                println!("      ✗ Missing: {}", pattern);
+            }
+        }
+        
+        // Test common patterns for p_embedder
+        let p_embedder_patterns = [
+            "p_embedder.in_layer.weight",
+            "p_embedder.out_layer.weight", 
+            "pooled_embedder.in_layer.weight",
+            "pooled_embedder.out_layer.weight",
+            "p_emb.in_layer.weight",
+            "p_emb.out_layer.weight",
+        ];
+        
+        println!("    Testing p_embedder patterns:");
+        for pattern in &p_embedder_patterns {
+            if vb.contains_key(pattern) {
+                println!("      ✓ Found: {}", pattern);
+            } else {
+                println!("      ✗ Missing: {}", pattern);
+            }
+        }
+        
+        // Test x_embedder patterns
+        let x_embedder_patterns = [
+            "x_embedder.proj.weight",
+            "x_embedder.proj.bias",
+            "x_embedder.weight",
+            "x_emb.proj.weight",
+            "patch_embed.proj.weight",
+        ];
+        
+        println!("    Testing x_embedder patterns:");
+        for pattern in &x_embedder_patterns {
+            if vb.contains_key(pattern) {
+                println!("      ✓ Found: {}", pattern);
+            } else {
+                println!("      ✗ Missing: {}", pattern);
+            }
+        }
+    }
+
     /// Prepare contexts from LLaMA and T5 embeddings using caption projection layers
     /// This matches the Python reference prepare_contexts method
     fn prepare_contexts(
@@ -792,12 +978,12 @@ impl HDQuantizedModel {
         // Process LLaMA embeddings through caption projection layers
         for (i, &layer_idx) in llama_layers.iter().enumerate() {
             let llama_layer = llama_embeds.i((.., layer_idx, .., ..))?; // [batch, seq_len, 4096]
-            let projected = self.caption_projection[i].forward(&llama_layer)?; // [batch, seq_len, inner_dim]
+            let projected = llama_layer.apply(&self.caption_projection[i])?; // [batch, seq_len, inner_dim]
             contexts.push(projected);
         }
         
         // Process T5 embeddings through the last caption projection layer
-        let t5_projected = self.caption_projection.last().unwrap().forward(t5_embeds)?;
+        let t5_projected = t5_embeds.apply(self.caption_projection.last().unwrap())?;
         contexts.push(t5_projected);
         
         Ok(contexts)

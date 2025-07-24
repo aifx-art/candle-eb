@@ -13,6 +13,14 @@ This is an extended version of the Candle deep learning framework with added sup
 ### DOING
 
 ### DONE
+- [x] Fix tensor name mapping issue in quantized model (t_embedder.in_layer.weight not found)
+- [x] Fix tensor loading issues in quantized model (bias tensors missing from GGUF)
+- [x] Fix model loading logic to properly load GGUF files when --quantized is specified
+- [x] Fix missing WithForward trait import in hidream main.rs
+- [x] Fix HiDream quantized model implementation errors
+- [x] Reference Flux quantized model structure for proper implementation
+- [x] Fix missing imports and function references in quantized_model.rs
+- [x] Ensure proper quantized tensor handling and operations
 - [x] Add HiDream model module structure
 - [x] Implement basic HiDream model components (attention, feed forward, MoE)
 - [x] Add HiDream configuration and model loading
