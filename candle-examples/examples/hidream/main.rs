@@ -446,130 +446,145 @@ fn run(args: Args) -> Result<()> {
     let latent_width = 2 * (args.width / (vae_scale_factor * 2));
     let mut latents = Tensor::randn(0f32, 1f32, (1, 64, latent_height, latent_width), &device)?
         .to_dtype(dtype)?;
-    {
-        println!("Loading HiDream model...");
-        if args.quantized {
-            #[cfg(feature = "quantized")]
-            {
-                let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(
-                    model_file, &device,
-                )?;
-                let model = hidream::quantized_model::HDQuantizedModel::new(&config, vb)?;
-                println!("HiDream quantized model loaded successfully");
-
-                println!(
-                    "Starting generation with {} steps...",
-                    args.num_inference_steps
-                        .unwrap_or(args.model.default_steps())
-                );
-
-                // Initialize scheduler
-                let num_steps = args
-                    .num_inference_steps
-                    .unwrap_or(args.model.default_steps());
-                let guidance_scale = args
-                    .guidance_scale
-                    .unwrap_or(args.model.default_guidance_scale());
-
-                let mut scheduler = hidream::schedulers::FlowMatchEulerDiscreteScheduler::new(
-                    1000,  // num_train_timesteps
-                    3.0,   // shift
-                    false, // use_dynamic_shifting
-                );
-                scheduler.set_timesteps(num_steps, &device)?;
-                let timesteps = scheduler.get_timesteps(&device, dtype)?;
-
-                // Encode input image if provided (for editing models)
-                let input_latents = if let Some(input_img) = input_image {
-                    // Load Flux VAE for proper image encoding/decoding
-                    println!("Loading Flux VAE...");
-                    let vae_repo = api.repo(hf_hub::Repo::model(
-                        "black-forest-labs/FLUX.1-dev".to_string(),
+        {
+            println!("Loading HiDream model...");
+            if args.quantized {
+                #[cfg(feature = "quantized")]
+                {
+                    // For quantized models, we need to load from GGUF files
+                    // Use the HuggingFace repository with GGUF models
+                    let gguf_repo = api.repo(hf_hub::Repo::model(
+                        "ND911/hidream_i1_fp8_full_dev_fast_ggufs".to_string(),
                     ));
-                    let vae_file = vae_repo.get("ae.safetensors")?;
-                    let vae_vb =
-                        unsafe { VarBuilder::from_mmaped_safetensors(&[vae_file], dtype, &device)? };
-                    let vae_config = flux::autoencoder::Config::dev();
-                    let vae = flux::autoencoder::AutoEncoder::new(&vae_config, vae_vb)?;
-                    println!("VAE loaded successfully");
+                    
+                    // Map model variants to GGUF filenames
+                    let gguf_filename = match args.model {
+                        ModelVariant::I1FastFp8 => "hidream_i1_fast_fp8.gguf",
+                        ModelVariant::I1DevFp8 => "hidream_i1_dev_fp8.gguf", 
+                        ModelVariant::I1FullFp8 => "hidream_i1_full_fp8.gguf",
+                        _ => anyhow::bail!("Quantized version not available for {:?}", args.model),
+                    };
+                    
+                    let gguf_file = gguf_repo.get(gguf_filename)?;
+                    let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(
+                        gguf_file, &device,
+                    )?;
+                    let model = hidream::quantized_model::HDQuantizedModel::new(&config, vb)?;
+                    println!("HiDream quantized model loaded successfully");
 
-                    println!("Encoding input image...");
-                    let encoded = vae.encode(&input_img)?;
-                    Some(encoded)
-                } else {
-                    None
-                };
-
-                // Generation loop with actual model forward passes
-                for (step, timestep) in timesteps.to_vec1::<f32>()?.iter().enumerate() {
                     println!(
-                        "Step {}/{} (timestep: {:.2})",
-                        step + 1,
-                        num_steps,
-                        timestep
+                        "Starting generation with {} steps...",
+                        args.num_inference_steps
+                            .unwrap_or(args.model.default_steps())
                     );
 
-                    let timestep_tensor = Tensor::new(&[*timestep], &device)?.to_dtype(dtype)?;
+                    // Initialize scheduler
+                    let num_steps = args
+                        .num_inference_steps
+                        .unwrap_or(args.model.default_steps());
+                    let guidance_scale = args
+                        .guidance_scale
+                        .unwrap_or(args.model.default_guidance_scale());
 
-                    // Prepare model inputs
-                    let latent_model_input = if guidance_scale > 1.0 {
-                        // Classifier-free guidance: duplicate latents
-                        Tensor::cat(&[&latents, &latents], 0)?
+                    let mut scheduler = hidream::schedulers::FlowMatchEulerDiscreteScheduler::new(
+                        1000,  // num_train_timesteps
+                        3.0,   // shift
+                        false, // use_dynamic_shifting
+                    );
+                    scheduler.set_timesteps(num_steps, &device)?;
+                    let timesteps = scheduler.get_timesteps(&device, dtype)?;
+
+                    // Encode input image if provided (for editing models)
+                    let input_latents = if let Some(input_img) = input_image {
+                        // Load Flux VAE for proper image encoding/decoding
+                        println!("Loading Flux VAE...");
+                        let vae_repo = api.repo(hf_hub::Repo::model(
+                            "black-forest-labs/FLUX.1-dev".to_string(),
+                        ));
+                        let vae_file = vae_repo.get("ae.safetensors")?;
+                        let vae_vb =
+                            unsafe { VarBuilder::from_mmaped_safetensors(&[vae_file], dtype, &device)? };
+                        let vae_config = flux::autoencoder::Config::dev();
+                        let vae = flux::autoencoder::AutoEncoder::new(&vae_config, vae_vb)?;
+                        println!("VAE loaded successfully");
+
+                        println!("Encoding input image...");
+                        let encoded = vae.encode(&input_img)?;
+                        Some(encoded)
                     } else {
-                        latents.clone()
+                        None
                     };
 
-                    // Prepare text embeddings for CFG
-                    let (encoder_hidden_states, pooled_embeds) = if guidance_scale > 1.0 {
-                        let t5_combined = Tensor::cat(&[&neg_pooled_emb, &t5_emb], 0)?;
-                        let llama_combined = Tensor::cat(&[&llama_emb, &llama_emb], 0)?;
-                        let pooled_combined = Tensor::cat(&[&neg_pooled_emb, &pooled_emb], 0)?;
-                        (vec![t5_combined, llama_combined], pooled_combined)
-                    } else {
-                        (vec![t5_emb.clone(), llama_emb.clone()], pooled_emb.clone())
-                    };
+                    // Generation loop with actual model forward passes
+                    for (step, timestep) in timesteps.to_vec1::<f32>()?.iter().enumerate() {
+                        println!(
+                            "Step {}/{} (timestep: {:.2})",
+                            step + 1,
+                            num_steps,
+                            timestep
+                        );
 
-                    // Concatenate input image latents for editing models
-                    let model_input = if let Some(ref input_lats) = input_latents {
-                        Tensor::cat(&[&latent_model_input, input_lats], D::Minus1)?
-                    } else {
-                        latent_model_input
-                    };
+                        let timestep_tensor = Tensor::new(&[*timestep], &device)?.to_dtype(dtype)?;
 
-                    // Forward pass through the model
-                    let noise_pred = model.forward_with_cfg(
-                        &model_input,
-                        &timestep_tensor,
-                        &encoder_hidden_states,
-                        &pooled_embeds,
-                        None,                 // img_sizes
-                        None,                 // img_ids
-                        &config.llama_layers, // llama_layers
-                    )?;
+                        // Prepare model inputs
+                        let latent_model_input = if guidance_scale > 1.0 {
+                            // Classifier-free guidance: duplicate latents
+                            Tensor::cat(&[&latents, &latents], 0)?
+                        } else {
+                            latents.clone()
+                        };
 
-                    // Apply classifier-free guidance
-                    let noise_pred = if guidance_scale > 1.0 {
-                        let chunks = noise_pred.chunk(2, 0)?;
-                        let noise_pred_uncond = &chunks[0];
-                        let noise_pred_text = &chunks[1];
-                        let guidance_tensor =
-                            Tensor::new(&[guidance_scale as f32], &device)?.to_dtype(dtype)?;
-                        let guidance_tensor = guidance_tensor.broadcast_as(noise_pred_text.shape())?;
+                        // Prepare text embeddings for CFG
+                        let (encoder_hidden_states, pooled_embeds) = if guidance_scale > 1.0 {
+                            let t5_combined = Tensor::cat(&[&neg_pooled_emb, &t5_emb], 0)?;
+                            let llama_combined = Tensor::cat(&[&llama_emb, &llama_emb], 0)?;
+                            let pooled_combined = Tensor::cat(&[&neg_pooled_emb, &pooled_emb], 0)?;
+                            (vec![t5_combined, llama_combined], pooled_combined)
+                        } else {
+                            (vec![t5_emb.clone(), llama_emb.clone()], pooled_emb.clone())
+                        };
 
-                        (noise_pred_uncond + &((noise_pred_text - noise_pred_uncond)? * &guidance_tensor)?)?
-                    } else {
-                        noise_pred
-                    };
+                        // Concatenate input image latents for editing models
+                        let model_input = if let Some(ref input_lats) = input_latents {
+                            Tensor::cat(&[&latent_model_input, input_lats], D::Minus1)?
+                        } else {
+                            latent_model_input
+                        };
 
-                    // Scheduler step
-                    latents = scheduler.step(&noise_pred, *timestep as f64, &latents)?;
+                        // Forward pass through the model
+                        let noise_pred = model.forward_with_cfg(
+                            &model_input,
+                            &timestep_tensor,
+                            &encoder_hidden_states,
+                            &pooled_embeds,
+                            None,                 // img_sizes
+                            None,                 // img_ids
+                            &config.llama_layers, // llama_layers
+                        )?;
+
+                        // Apply classifier-free guidance
+                        let noise_pred = if guidance_scale > 1.0 {
+                            let chunks = noise_pred.chunk(2, 0)?;
+                            let noise_pred_uncond = &chunks[0];
+                            let noise_pred_text = &chunks[1];
+                            let guidance_tensor =
+                                Tensor::new(&[guidance_scale as f32], &device)?.to_dtype(dtype)?;
+                            let guidance_tensor = guidance_tensor.broadcast_as(noise_pred_text.shape())?;
+
+                            (noise_pred_uncond + &((noise_pred_text - noise_pred_uncond)? * &guidance_tensor)?)?
+                        } else {
+                            noise_pred
+                        };
+
+                        // Scheduler step
+                        latents = scheduler.step(&noise_pred, *timestep as f64, &latents)?;
+                    }
                 }
-            }
-            #[cfg(not(feature = "quantized"))]
-            {
-                anyhow::bail!("Quantized models are not supported in this build. Please enable the 'quantized' feature.")
-            }
-        } else {
+                #[cfg(not(feature = "quantized"))]
+                {
+                    anyhow::bail!("Quantized models are not supported in this build. Please enable the 'quantized' feature.")
+                }
+            } else {
             let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, &device)? };
             let model = hidream::HDModel::new(&config, vb)?;
             println!("HiDream model loaded successfully");
