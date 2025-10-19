@@ -102,14 +102,24 @@ fn run(args: Args) -> Result<()> {
     let img = match decode_only {
         None => {
             let t5_emb = {
+                let reponame = "comfyanonymous/flux_text_encoders";
+                let repofile = "t5xxl_fp16.safetensors";
+                let repo = api.repo(hf_hub::Repo::model(reponame.to_string()));
+
+                println!(
+                    "Getting T5 from {:?} url {:?}",
+                    repo,
+                    repo.url("model.safetensors")
+                );
+                let model_file = repo.get(repofile)?;
+                let vb = unsafe {
+                    VarBuilder::from_mmaped_safetensors(&[model_file], dtype, &device)?
+                };
                 let repo = api.repo(hf_hub::Repo::with_revision(
                     "google/t5-v1_1-xxl".to_string(),
                     hf_hub::RepoType::Model,
                     "refs/pr/2".to_string(),
                 ));
-                let model_file = repo.get("model.safetensors")?;
-                let vb =
-                    unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], dtype, &device)? };
                 let config_filename = repo.get("config.json")?;
                 let config = std::fs::read_to_string(config_filename)?;
                 let config: t5::Config = serde_json::from_str(&config)?;
@@ -118,6 +128,7 @@ fn run(args: Args) -> Result<()> {
                     .model("lmz/mt5-tokenizers".to_string())
                     .get("t5-v1_1-xxl.tokenizer.json")?;
                 let tokenizer = Tokenizer::from_file(tokenizer_filename).map_err(E::msg)?;
+
                 let mut tokens = tokenizer
                     .encode(prompt.as_str(), true)
                     .map_err(E::msg)?
@@ -125,10 +136,13 @@ fn run(args: Args) -> Result<()> {
                     .to_vec();
                 tokens.resize(256, 0);
                 let input_token_ids = Tensor::new(&tokens[..], &device)?.unsqueeze(0)?;
-                println!("{input_token_ids}");
-                model.forward(&input_token_ids)?
+                println!("input_token_ids: {:?}", input_token_ids);
+                let pos = model.forward(&input_token_ids)?;
+                println!("pos: {:?}", pos);
+                
+                pos
             };
-            println!("T5\n{t5_emb}");
+            println!("T5 {:?}", t5_emb);
             let clip_emb = {
                 let repo = api.repo(hf_hub::Repo::model(
                     "openai/clip-vit-large-patch14".to_string(),
@@ -190,8 +204,11 @@ fn run(args: Args) -> Result<()> {
                         Model::Schnell => api
                             .repo(hf_hub::Repo::model("lmz/candle-flux".to_string()))
                             .get("flux1-schnell.gguf")?,
-                        Model::Dev => todo!(),
+                        Model::Dev => api
+                            .repo(hf_hub::Repo::model("aifx-art/Jib_Mix_Flux_v7_Beta-GGUF".to_string()))
+                            .get("Jib_Mix_Flux_v7_Beta-Q5_K_M.gguf")?,
                     };
+                    println!("{:?}",model_file);
                     let vb = candle_transformers::quantized_var_builder::VarBuilder::from_gguf(
                         model_file, &device,
                     )?;
